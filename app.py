@@ -1,16 +1,14 @@
 """
-🎤 Real-time Voice Assistant - Streaming STT+LLM+TTS
-Версия: 5.0.0 - Real-time с классическими OpenAI API
+🎤 Hands-Free Real-time Voice Assistant v6.0
+Режим "телефонного разговора" - без кнопок, с перебиванием
 
-Архитектура:
-- Streaming audio input через WebSocket
-- Voice Activity Detection 
-- Auto-commit в Whisper STT
-- Instant GPT-4o-mini processing
-- Streaming TTS-1 output
-- Interruption handling
-
-Автор: AI Assistant
+Особенности:
+- Постоянная прослушка микрофона
+- Автоматическое определение речи (VAD)
+- Перебивание ассистента во время говорения
+- Подавление эха собственного голоса
+- Умное управление очередями аудио
+- Бесшовные переходы между состояниями
 """
 
 import asyncio
@@ -22,11 +20,13 @@ import uuid
 import os
 import tempfile
 import io
-from typing import Optional, Dict, Any, List, Callable
+import wave
+from typing import Optional, Dict, Any, List, Set
 from dataclasses import dataclass
 from enum import Enum
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import collections
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -42,548 +42,609 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# API ключ OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     logger.error("🚨 OPENAI_API_KEY не установлен!")
     raise ValueError("OpenAI API key is required")
 
-# Инициализация OpenAI клиента
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Конфигурация реального времени
-REALTIME_CONFIG = {
-    "audio_chunk_duration_ms": 100,    # Размер аудио чанка в мс
-    "silence_threshold": 0.01,         # Порог тишины для VAD
-    "silence_duration_ms": 800,        # Длительность тишины для auto-commit
-    "max_audio_buffer_duration": 30,   # Макс. длительность буфера в сек
-    "vad_check_interval_ms": 50,       # Интервал проверки VAD
-    "interruption_response_ms": 200,   # Время отклика на перебивание
+# Конфигурация для hands-free режима
+HANDS_FREE_CONFIG = {
+    # Аудио настройки
+    "audio_chunk_duration_ms": 100,     # Частые чанки для быстрой реакции
+    "sample_rate": 16000,               # Стандартный sample rate
+    "channels": 1,                      # Моно
     
-    # Whisper настройки
+    # VAD настройки
+    "vad_threshold": 0.008,             # Порог детекции голоса
+    "vad_hang_time_ms": 600,            # Время "висения" после тишины
+    "vad_attack_time_ms": 150,          # Время подтверждения начала речи
+    "min_speech_duration_ms": 400,      # Минимальная длительность речи
+    "max_speech_duration_ms": 30000,    # Максимальная длительность речи
+    
+    # Перебивание
+    "interrupt_threshold": 0.012,       # Порог для перебивания (выше обычного)
+    "interrupt_confirmation_ms": 200,   # Время подтверждения перебивания
+    "interrupt_fade_out_ms": 100,       # Время затухания при перебивании
+    
+    # Эхо-подавление
+    "echo_suppression_duration_ms": 1500,  # Время подавления эха после TTS
+    "echo_suppression_factor": 0.4,        # Фактор снижения чувствительности
+    
+    # Буферизация
+    "audio_buffer_size": 50,            # Размер кольцевого буфера
+    "processing_overlap_ms": 200,       # Перекрытие для плавности
+    
+    # OpenAI настройки
     "whisper": {
         "model": "whisper-1",
         "language": "ru",
         "temperature": 0.0,
-        "prompt": "Голосовой ассистент. Пользователь говорит на русском языке."
+        "prompt": "Разговор с голосовым ассистентом. Пользователь может перебивать."
     },
     
-    # GPT настройки  
     "gpt": {
         "model": "gpt-4o-mini",
-        "max_tokens": 150,
-        "temperature": 0.7,
-        "stream": False  # Пока без стриминга для простоты
+        "max_tokens": 100,               # Короткие ответы для диалога
+        "temperature": 0.8,              # Более живой диалог
+        "stream": False
     },
     
-    # TTS настройки
     "tts": {
         "model": "tts-1",
-        "voice": "alloy", 
-        "speed": 1.1,  # Чуть быстрее для реального времени
+        "voice": "alloy",
+        "speed": 1.1,                    # Чуть быстрее для динамичности
         "response_format": "mp3"
     }
 }
 
-# ===== ТИПЫ И СОСТОЯНИЯ =====
+# ===== СОСТОЯНИЯ =====
 
 class ConversationState(Enum):
-    IDLE = "idle"
-    LISTENING = "listening"
-    PROCESSING_STT = "processing_stt"
-    PROCESSING_LLM = "processing_llm" 
-    PROCESSING_TTS = "processing_tts"
-    SPEAKING = "speaking"
-    INTERRUPTED = "interrupted"
+    INITIALIZING = "initializing"       # Инициализация микрофона
+    LISTENING = "listening"             # Активное прослушивание
+    SPEECH_DETECTED = "speech_detected" # Обнаружена речь
+    PROCESSING = "processing"           # Обработка STT+LLM+TTS
+    SPEAKING = "speaking"               # Воспроизведение ответа
+    INTERRUPTED = "interrupted"         # Перебивание
+    ERROR = "error"                     # Ошибка
+    PAUSED = "paused"                   # Пауза
 
 @dataclass
 class AudioChunk:
     data: bytes
     timestamp: float
+    amplitude: float
     chunk_id: int
-    amplitude: float = 0.0
+    is_echo_suppressed: bool = False
 
 @dataclass
-class ProcessingMetrics:
-    stt_latency_ms: float = 0.0
-    llm_latency_ms: float = 0.0
-    tts_latency_ms: float = 0.0
-    total_latency_ms: float = 0.0
-    audio_duration_ms: float = 0.0
+class SpeechSegment:
+    start_time: float
+    end_time: float
+    audio_data: bytes
+    confidence: float = 0.0
 
-# ===== VOICE ACTIVITY DETECTOR =====
+# ===== УЛУЧШЕННЫЙ VAD =====
 
-class VoiceActivityDetector:
-    """Определение голосовой активности"""
+class AdvancedVAD:
+    """Продвинутый детектор голосовой активности для hands-free режима"""
     
-    def __init__(self, 
-                 silence_threshold: float = 0.01,
-                 silence_duration_ms: int = 800):
-        self.silence_threshold = silence_threshold
-        self.silence_duration_ms = silence_duration_ms
-        self.last_voice_time = 0.0
-        self.is_voice_active = False
+    def __init__(self, config: dict):
+        self.threshold = config["vad_threshold"]
+        self.hang_time_ms = config["vad_hang_time_ms"]
+        self.attack_time_ms = config["vad_attack_time_ms"]
+        self.interrupt_threshold = config["interrupt_threshold"]
+        self.interrupt_confirmation_ms = config["interrupt_confirmation_ms"]
         
-    def process_chunk(self, audio_chunk: AudioChunk) -> dict:
-        """
-        Обрабатывает аудио чанк и возвращает VAD результат
-        """
-        # Простейший VAD - по амплитуде
-        # В продакшене можно заменить на более сложный алгоритм
+        # Состояние VAD
+        self.is_speech_active = False
+        self.speech_start_time = 0.0
+        self.last_speech_time = 0.0
+        self.potential_speech_start = 0.0
         
-        current_time = audio_chunk.timestamp
-        has_voice = audio_chunk.amplitude > self.silence_threshold
+        # Для перебивания
+        self.interrupt_candidate_start = 0.0
+        self.is_interrupt_detected = False
+        
+        # Скользящее окно для сглаживания
+        self.amplitude_window = collections.deque(maxlen=5)
+        self.long_term_noise = collections.deque(maxlen=50)  # Для адаптивного порога
+        
+        # Эхо-подавление
+        self.echo_suppression_until = 0.0
+        self.echo_factor = config.get("echo_suppression_factor", 0.4)
+        
+    def set_echo_suppression(self, duration_ms: float):
+        """Устанавливает время подавления эха"""
+        self.echo_suppression_until = time.time() + (duration_ms / 1000.0)
+        logger.debug(f"Эхо-подавление на {duration_ms}ms")
+        
+    def process_chunk(self, chunk: AudioChunk) -> Dict[str, Any]:
+        """Анализирует аудио чанк и возвращает VAD решения"""
+        
+        current_time = chunk.timestamp
+        amplitude = chunk.amplitude
+        
+        # Обновляем окна
+        self.amplitude_window.append(amplitude)
+        self.long_term_noise.append(amplitude)
+        
+        # Сглаженная амплитуда
+        smooth_amplitude = sum(self.amplitude_window) / len(self.amplitude_window)
+        
+        # Адаптивный порог на основе фонового шума
+        if len(self.long_term_noise) > 10:
+            noise_floor = sum(sorted(self.long_term_noise)[:20]) / 20  # Нижние 40%
+            adaptive_threshold = max(self.threshold, noise_floor * 3)
+        else:
+            adaptive_threshold = self.threshold
+        
+        # Эхо-подавление
+        effective_amplitude = smooth_amplitude
+        if current_time < self.echo_suppression_until:
+            effective_amplitude *= self.echo_factor
+            chunk.is_echo_suppressed = True
         
         result = {
-            "has_voice": has_voice,
-            "is_speech_active": self.is_voice_active,
-            "silence_duration_ms": 0,
-            "should_commit": False
+            "timestamp": current_time,
+            "amplitude": amplitude,
+            "smooth_amplitude": smooth_amplitude,
+            "effective_amplitude": effective_amplitude,
+            "adaptive_threshold": adaptive_threshold,
+            "is_speech_active": self.is_speech_active,
+            "is_echo_suppressed": chunk.is_echo_suppressed
         }
         
+        # Детекция речи
+        has_voice = effective_amplitude > adaptive_threshold
+        
         if has_voice:
-            if not self.is_voice_active:
-                # Начало речи
-                self.is_voice_active = True
-                result["speech_started"] = True
-                logger.info("🎤 Speech started detected")
-                
-            self.last_voice_time = current_time
+            if not self.is_speech_active:
+                # Потенциальное начало речи
+                if self.potential_speech_start == 0:
+                    self.potential_speech_start = current_time
+                    
+                # Подтверждение речи после attack time
+                elif (current_time - self.potential_speech_start) * 1000 >= self.attack_time_ms:
+                    self.is_speech_active = True
+                    self.speech_start_time = self.potential_speech_start
+                    result["speech_started"] = True
+                    result["speech_start_time"] = self.speech_start_time
+                    logger.info("🎤 Начало речи подтверждено")
+                    
+            self.last_speech_time = current_time
             
         else:
             # Тишина
-            if self.is_voice_active:
-                silence_duration = (current_time - self.last_voice_time) * 1000
-                result["silence_duration_ms"] = silence_duration
+            self.potential_speech_start = 0  # Сброс потенциального начала
+            
+            if self.is_speech_active:
+                silence_duration = (current_time - self.last_speech_time) * 1000
                 
-                if silence_duration >= self.silence_duration_ms:
+                if silence_duration >= self.hang_time_ms:
                     # Конец речи
-                    self.is_voice_active = False
-                    result["speech_stopped"] = True
-                    result["should_commit"] = True
-                    logger.info(f"🔇 Speech stopped after {silence_duration:.0f}ms silence")
+                    self.is_speech_active = False
+                    speech_duration = (self.last_speech_time - self.speech_start_time) * 1000
+                    
+                    result["speech_ended"] = True
+                    result["speech_duration_ms"] = speech_duration
+                    result["should_process"] = speech_duration >= HANDS_FREE_CONFIG["min_speech_duration_ms"]
+                    
+                    logger.info(f"🔇 Конец речи. Длительность: {speech_duration:.0f}ms")
         
-        return result
-
-# ===== AUDIO PROCESSOR =====
-
-class AudioProcessor:
-    """Обработка аудио в реальном времени"""
-    
-    def __init__(self):
-        self.audio_buffer: List[AudioChunk] = []
-        self.chunk_counter = 0
-        self.buffer_start_time = 0.0
-        
-    def add_chunk(self, audio_data: bytes, timestamp: float) -> AudioChunk:
-        """Добавляет аудио чанк в буфер"""
-        
-        # Вычисляем амплитуду для VAD
-        amplitude = self._calculate_amplitude(audio_data)
-        
-        chunk = AudioChunk(
-            data=audio_data,
-            timestamp=timestamp,
-            chunk_id=self.chunk_counter,
-            amplitude=amplitude
-        )
-        
-        self.audio_buffer.append(chunk)
-        self.chunk_counter += 1
-        
-        if len(self.audio_buffer) == 1:
-            self.buffer_start_time = timestamp
-            
-        return chunk
-    
-    def get_buffer_audio(self) -> bytes:
-        """Возвращает объединенное аудио из буфера"""
-        if not self.audio_buffer:
-            return b""
-            
-        combined_audio = b"".join(chunk.data for chunk in self.audio_buffer)
-        return combined_audio
-    
-    def get_buffer_duration_ms(self) -> float:
-        """Возвращает длительность буфера в мс"""
-        if not self.audio_buffer:
-            return 0.0
-        
-        last_chunk = self.audio_buffer[-1]
-        duration = (last_chunk.timestamp - self.buffer_start_time) * 1000
-        return duration
-    
-    def clear_buffer(self):
-        """Очищает аудио буфер"""
-        chunk_count = len(self.audio_buffer)
-        duration = self.get_buffer_duration_ms()
-        
-        self.audio_buffer.clear()
-        self.buffer_start_time = 0.0
-        
-        logger.info(f"🧹 Buffer cleared: {chunk_count} chunks, {duration:.0f}ms")
-    
-    def _calculate_amplitude(self, audio_data: bytes) -> float:
-        """Вычисляет среднюю амплитуду аудио чанка"""
-        if len(audio_data) < 2:
-            return 0.0
-            
-        try:
-            # Предполагаем 16-bit PCM
-            import struct
-            sample_count = len(audio_data) // 2
-            
-            if sample_count == 0:
-                return 0.0
+        # Детекция перебивания (только когда ассистент говорит)
+        if effective_amplitude > self.interrupt_threshold:
+            if not self.is_interrupt_detected and self.interrupt_candidate_start == 0:
+                self.interrupt_candidate_start = current_time
                 
-            # Конвертируем в int16 и вычисляем RMS
-            samples = struct.unpack(f"<{sample_count}h", audio_data[:sample_count * 2])
-            rms = (sum(s * s for s in samples) / sample_count) ** 0.5
-            
-            # Нормализуем к диапазону 0-1
-            normalized_rms = rms / 32768.0
-            return normalized_rms
-            
-        except Exception as e:
-            logger.warning(f"Error calculating amplitude: {e}")
-            return 0.0
+            elif self.interrupt_candidate_start > 0:
+                interrupt_duration = (current_time - self.interrupt_candidate_start) * 1000
+                if interrupt_duration >= self.interrupt_confirmation_ms:
+                    self.is_interrupt_detected = True
+                    result["interrupt_detected"] = True
+                    result["interrupt_amplitude"] = effective_amplitude
+                    logger.info("⚡ Перебивание обнаружено!")
+        else:
+            # Сброс детекции перебивания при снижении амплитуды
+            if self.interrupt_candidate_start > 0:
+                self.interrupt_candidate_start = 0
+                
+        return result
+    
+    def reset_interrupt_detection(self):
+        """Сброс состояния детекции перебивания"""
+        self.is_interrupt_detected = False
+        self.interrupt_candidate_start = 0
 
-# ===== REALTIME CONVERSATION SESSION =====
+# ===== КОЛЬЦЕВОЙ АУДИО БУФЕР =====
 
-class RealtimeConversationSession:
-    """
-    Управляет сессией реального времени разговора
-    """
+class CircularAudioBuffer:
+    """Кольцевой буфер для постоянного хранения аудио"""
+    
+    def __init__(self, max_size: int = 50):
+        self.buffer = collections.deque(maxlen=max_size)
+        self.speech_start_index = None
+        self.total_chunks = 0
+        
+    def add_chunk(self, chunk: AudioChunk):
+        """Добавляет чанк в буфер"""
+        chunk.chunk_id = self.total_chunks
+        self.buffer.append(chunk)
+        self.total_chunks += 1
+        
+    def mark_speech_start(self, timestamp: float):
+        """Отмечает начало речи в буфере"""
+        # Находим ближайший чанк к времени начала речи
+        for i, chunk in enumerate(self.buffer):
+            if abs(chunk.timestamp - timestamp) < 0.1:  # 100ms tolerance
+                self.speech_start_index = len(self.buffer) - len(self.buffer) + i
+                break
+        
+    def extract_speech_segment(self, end_timestamp: float) -> Optional[bytes]:
+        """Извлекает сегмент речи из буфера"""
+        if self.speech_start_index is None:
+            return None
+            
+        speech_chunks = []
+        speech_started = False
+        
+        for chunk in self.buffer:
+            # Начинаем сбор с отмеченного начала речи
+            if not speech_started and chunk.timestamp >= (self.buffer[0].timestamp if self.speech_start_index == 0 else self.buffer[self.speech_start_index].timestamp):
+                speech_started = True
+                
+            if speech_started:
+                speech_chunks.append(chunk.data)
+                
+                # Заканчиваем на указанном времени
+                if chunk.timestamp >= end_timestamp:
+                    break
+        
+        if speech_chunks:
+            return b''.join(speech_chunks)
+        return None
+    
+    def clear_speech_markers(self):
+        """Очищает маркеры речи"""
+        self.speech_start_index = None
+
+# ===== HANDS-FREE СЕССИЯ =====
+
+class HandsFreeSession:
+    """Основная сессия hands-free голосового ассистента"""
     
     def __init__(self, session_id: str, websocket: WebSocket):
         self.session_id = session_id
         self.websocket = websocket
-        self.state = ConversationState.IDLE
+        self.state = ConversationState.INITIALIZING
         
-        # Аудио компоненты
-        self.audio_processor = AudioProcessor()
-        self.vad = VoiceActivityDetector(
-            silence_threshold=REALTIME_CONFIG["silence_threshold"],
-            silence_duration_ms=REALTIME_CONFIG["silence_duration_ms"]
-        )
+        # Компоненты
+        self.vad = AdvancedVAD(HANDS_FREE_CONFIG)
+        self.audio_buffer = CircularAudioBuffer(HANDS_FREE_CONFIG["audio_buffer_size"])
         
-        # Контекст разговора
-        self.conversation_history: List[Dict[str, str]] = []
-        self.current_processing_start = 0.0
+        # Обработка
+        self.executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="OpenAI")
+        self.current_processing_task = None
+        self.current_playback_task = None
         
-        # ThreadPoolExecutor для блокирующих OpenAI вызовов
-        self.executor = ThreadPoolExecutor(max_workers=3)
+        # Состояние
+        self.conversation_history = []
+        self.is_active = True
+        self.last_interaction = time.time()
         
         # Метрики
-        self.metrics = ProcessingMetrics()
-        self.total_interactions = 0
+        self.total_exchanges = 0
         self.interruptions_count = 0
+        self.false_positives = 0
         
-        logger.info(f"🎤 Created conversation session: {session_id}")
+        logger.info(f"🎤 Создана hands-free сессия: {session_id}")
+    
+    async def initialize(self):
+        """Инициализация сессии"""
+        await self._update_state(ConversationState.LISTENING)
+        await self._send_event("session_ready", {
+            "message": "Голосовой ассистент готов. Говорите в любое время!",
+            "config": {
+                "vad_threshold": HANDS_FREE_CONFIG["vad_threshold"],
+                "interrupt_enabled": True,
+                "echo_suppression": True
+            }
+        })
+        logger.info("✅ Hands-free сессия инициализирована")
     
     async def process_audio_chunk(self, audio_data: bytes):
-        """Обрабатывает входящий аудио чанк"""
+        """Непрерывная обработка аудио чанков"""
         
-        timestamp = time.time()
+        if not self.is_active:
+            return
+            
+        try:
+            # Создаем чанк
+            timestamp = time.time()
+            amplitude = self._calculate_amplitude(audio_data)
+            
+            chunk = AudioChunk(
+                data=audio_data,
+                timestamp=timestamp,
+                amplitude=amplitude,
+                chunk_id=0  # Будет установлен в буфере
+            )
+            
+            # Добавляем в кольцевой буфер
+            self.audio_buffer.add_chunk(chunk)
+            
+            # VAD анализ
+            vad_result = self.vad.process_chunk(chunk)
+            
+            # Обрабатываем VAD события
+            await self._handle_vad_events(vad_result)
+            
+            # Отправляем состояние (каждые 10 чанков для экономии)
+            if chunk.chunk_id % 10 == 0:
+                await self._send_audio_status(vad_result)
+                
+        except Exception as e:
+            logger.error(f"Ошибка обработки аудио: {e}")
+            await self._send_event("error", {"message": str(e)})
+    
+    async def _handle_vad_events(self, vad_result: Dict[str, Any]):
+        """Обработка событий VAD"""
         
-        # Добавляем в буфер
-        chunk = self.audio_processor.add_chunk(audio_data, timestamp)
-        
-        # VAD анализ
-        vad_result = self.vad.process_chunk(chunk)
-        
-        # Обновляем состояние на основе VAD
+        # Начало речи
         if vad_result.get("speech_started"):
-            await self._update_state(ConversationState.LISTENING)
-            await self._send_event("speech_started", {"timestamp": timestamp})
-        
-        if vad_result.get("speech_stopped"):
-            await self._send_event("speech_stopped", {
-                "timestamp": timestamp,
-                "duration_ms": self.audio_processor.get_buffer_duration_ms()
-            })
+            if self.state == ConversationState.LISTENING:
+                await self._update_state(ConversationState.SPEECH_DETECTED)
+                self.audio_buffer.mark_speech_start(vad_result["speech_start_time"])
+                await self._send_event("speech_detection", {
+                    "type": "started",
+                    "timestamp": vad_result["speech_start_time"]
+                })
             
-        # Автоматический commit при окончании речи
-        if vad_result.get("should_commit"):
-            await self._commit_audio_buffer()
-            
-        # Проверяем переполнение буфера
-        buffer_duration = self.audio_processor.get_buffer_duration_ms()
-        if buffer_duration > REALTIME_CONFIG["max_audio_buffer_duration"] * 1000:
-            logger.warning(f"Audio buffer overflow: {buffer_duration:.0f}ms")
-            await self._commit_audio_buffer()
+            elif self.state == ConversationState.SPEAKING:
+                # Потенциальное перебивание
+                logger.info("🎤 Речь обнаружена во время воспроизведения")
+        
+        # Конец речи
+        if vad_result.get("speech_ended"):
+            if self.state == ConversationState.SPEECH_DETECTED:
+                speech_duration = vad_result["speech_duration_ms"]
+                should_process = vad_result["should_process"]
+                
+                await self._send_event("speech_detection", {
+                    "type": "ended",
+                    "duration_ms": speech_duration,
+                    "will_process": should_process
+                })
+                
+                if should_process:
+                    # Извлекаем речевой сегмент и запускаем обработку
+                    speech_audio = self.audio_buffer.extract_speech_segment(vad_result["timestamp"])
+                    if speech_audio:
+                        await self._process_speech_segment(speech_audio, speech_duration)
+                    else:
+                        logger.warning("Не удалось извлечь речевой сегмент")
+                        await self._update_state(ConversationState.LISTENING)
+                else:
+                    # Слишком короткая речь
+                    self.false_positives += 1
+                    await self._update_state(ConversationState.LISTENING)
+                
+                self.audio_buffer.clear_speech_markers()
+        
+        # Перебивание
+        if vad_result.get("interrupt_detected"):
+            if self.state == ConversationState.SPEAKING:
+                await self._handle_interruption(vad_result)
     
-    async def _commit_audio_buffer(self):
-        """Отправляет аудио буфер на обработку через STT"""
+    async def _process_speech_segment(self, audio_data: bytes, duration_ms: float):
+        """Обработка речевого сегмента через STT->LLM->TTS"""
         
-        if self.state != ConversationState.LISTENING:
-            return
+        await self._update_state(ConversationState.PROCESSING)
         
-        audio_data = self.audio_processor.get_buffer_audio()
-        if len(audio_data) < 1000:  # Минимальный размер
-            logger.info("Audio buffer too small, skipping")
-            self.audio_processor.clear_buffer()
-            await self._update_state(ConversationState.IDLE)
-            return
+        # Отменяем предыдущую обработку если есть
+        if self.current_processing_task and not self.current_processing_task.done():
+            self.current_processing_task.cancel()
         
-        duration_ms = self.audio_processor.get_buffer_duration_ms()
-        logger.info(f"🎯 Committing audio buffer: {len(audio_data)} bytes, {duration_ms:.0f}ms")
-        
-        # Очищаем буфер сразу для приема нового аудио
-        self.audio_processor.clear_buffer()
-        
-        # Начинаем обработку
-        self.current_processing_start = time.time()
-        await self._update_state(ConversationState.PROCESSING_STT)
-        
-        # Запускаем полный pipeline обработки
-        asyncio.create_task(self._process_audio_pipeline(audio_data, duration_ms))
+        self.current_processing_task = asyncio.create_task(
+            self._full_processing_pipeline(audio_data, duration_ms)
+        )
     
-    async def _process_audio_pipeline(self, audio_data: bytes, duration_ms: float):
-        """Полный pipeline: STT → LLM → TTS"""
+    async def _full_processing_pipeline(self, audio_data: bytes, duration_ms: float):
+        """Полный pipeline обработки"""
         
         try:
             pipeline_start = time.time()
             
-            # 1. STT - Whisper
-            await self._update_state(ConversationState.PROCESSING_STT)
-            transcript = await self._run_whisper_stt(audio_data)
+            # 1. STT
+            await self._send_event("processing_stage", {"stage": "stt", "status": "started"})
+            transcript = await self._run_stt(audio_data)
             
             if not transcript or len(transcript.strip()) < 2:
-                logger.info("Empty transcript, returning to idle")
-                await self._update_state(ConversationState.IDLE)
+                logger.info("Пустая транскрипция, возвращаемся к прослушиванию")
+                await self._update_state(ConversationState.LISTENING)
                 return
             
-            # Отправляем транскрипцию клиенту
-            await self._send_event("transcription", {
-                "text": transcript,
-                "duration_ms": duration_ms
-            })
+            await self._send_event("transcription", {"text": transcript})
             
-            # 2. LLM - GPT
-            await self._update_state(ConversationState.PROCESSING_LLM)
-            response_text = await self._run_gpt_generation(transcript)
+            # 2. LLM
+            await self._send_event("processing_stage", {"stage": "llm", "status": "started"})
+            response_text = await self._run_llm(transcript)
             
-            # Отправляем текстовый ответ
-            await self._send_event("llm_response", {
-                "text": response_text
-            })
+            await self._send_event("llm_response", {"text": response_text})
             
-            # 3. TTS - OpenAI TTS
-            await self._update_state(ConversationState.PROCESSING_TTS)
-            await self._run_tts_synthesis(response_text)
+            # 3. TTS и воспроизведение
+            await self._send_event("processing_stage", {"stage": "tts", "status": "started"})
+            await self._run_tts_and_play(response_text)
             
-            # Вычисляем итоговые метрики
+            # Статистика
             total_latency = (time.time() - pipeline_start) * 1000
-            self.metrics.total_latency_ms = total_latency
-            self.total_interactions += 1
+            self.total_exchanges += 1
             
-            logger.info(f"⚡ Total pipeline latency: {total_latency:.0f}ms")
-            
-            await self._send_event("pipeline_complete", {
+            await self._send_event("processing_complete", {
                 "total_latency_ms": total_latency,
-                "stt_latency_ms": self.metrics.stt_latency_ms,
-                "llm_latency_ms": self.metrics.llm_latency_ms,
-                "tts_latency_ms": self.metrics.tts_latency_ms
+                "total_exchanges": self.total_exchanges
             })
             
-            # Возвращаемся к ожиданию
-            await self._update_state(ConversationState.IDLE)
+            # Возвращаемся к прослушиванию
+            await self._update_state(ConversationState.LISTENING)
             
+        except asyncio.CancelledError:
+            logger.info("Обработка отменена")
+            await self._update_state(ConversationState.LISTENING)
         except Exception as e:
-            logger.error(f"Pipeline error: {e}")
-            await self._send_event("error", {
-                "message": f"Ошибка обработки: {str(e)}"
-            })
-            await self._update_state(ConversationState.IDLE)
+            logger.error(f"Ошибка в pipeline: {e}")
+            await self._send_event("error", {"message": f"Ошибка обработки: {str(e)}"})
+            await self._update_state(ConversationState.LISTENING)
     
-    async def _run_whisper_stt(self, audio_data: bytes) -> str:
-        """Запускает Whisper STT"""
-        
-        start_time = time.time()
+    async def _run_stt(self, audio_data: bytes) -> str:
+        """Запуск Whisper STT"""
         
         def whisper_call():
             try:
-                # Создаем временный файл
-                with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as temp_file:
-                    temp_file.write(audio_data)
+                # Конвертируем в WAV
+                wav_data = self._convert_to_wav(audio_data)
+                
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                    temp_file.write(wav_data)
                     temp_path = temp_file.name
                 
                 try:
-                    # Вызов Whisper API
                     with open(temp_path, 'rb') as audio_file:
                         response = openai_client.audio.transcriptions.create(
-                            model=REALTIME_CONFIG["whisper"]["model"],
+                            model=HANDS_FREE_CONFIG["whisper"]["model"],
                             file=audio_file,
-                            language=REALTIME_CONFIG["whisper"]["language"],
-                            temperature=REALTIME_CONFIG["whisper"]["temperature"],
-                            prompt=REALTIME_CONFIG["whisper"]["prompt"]
+                            language=HANDS_FREE_CONFIG["whisper"]["language"],
+                            temperature=HANDS_FREE_CONFIG["whisper"]["temperature"],
+                            prompt=HANDS_FREE_CONFIG["whisper"]["prompt"]
                         )
-                    
                     return response.text.strip()
-                    
                 finally:
-                    # Удаляем временный файл
                     try:
                         os.unlink(temp_path)
                     except:
                         pass
                         
             except Exception as e:
-                logger.error(f"Whisper error: {e}")
+                logger.error(f"Whisper ошибка: {e}")
                 return ""
         
-        # Выполняем в отдельном потоке
-        transcript = await asyncio.get_event_loop().run_in_executor(
-            self.executor, whisper_call
-        )
-        
-        latency_ms = (time.time() - start_time) * 1000
-        self.metrics.stt_latency_ms = latency_ms
-        
-        logger.info(f"🎤 STT completed ({latency_ms:.0f}ms): {transcript}")
-        return transcript
+        return await asyncio.get_event_loop().run_in_executor(self.executor, whisper_call)
     
-    async def _run_gpt_generation(self, user_message: str) -> str:
-        """Запускает GPT генерацию"""
+    async def _run_llm(self, user_text: str) -> str:
+        """Запуск GPT"""
         
-        start_time = time.time()
-        
-        # Добавляем в историю
-        self.conversation_history.append({
-            "role": "user",
-            "content": user_message
-        })
+        # Обновляем историю
+        self.conversation_history.append({"role": "user", "content": user_text})
         
         # Ограничиваем историю
-        if len(self.conversation_history) > 10:
-            self.conversation_history = self.conversation_history[-8:]
+        if len(self.conversation_history) > 8:
+            self.conversation_history = self.conversation_history[-6:]
         
         def gpt_call():
             try:
                 messages = [
                     {
                         "role": "system",
-                        "content": """Ты - дружелюбный голосовой ассистент.
+                        "content": """Ты голосовой ассистент в режиме живого разговора.
 
 Правила:
-- Отвечай ОЧЕНЬ кратко (1-2 предложения максимум)
-- Говори естественно и живо
-- Проявляй энтузиазм и позитивность  
-- Если не знаешь - честно скажи
-- Никаких длинных объяснений
+- Отвечай ОЧЕНЬ кратко (1-2 предложения)
+- Говори естественно, как в телефонном разговоре
+- Пользователь может тебя перебивать - это нормально
+- Если тебя перебили, не обижайся, продолжай диалог
+- Будь дружелюбным и отзывчивым
+- Не повторяй "как дела" постоянно
 
-Стиль: Как настоящий человек, а не робот."""
+Стиль: Живой разговор, а не формальные ответы."""
                     }
                 ] + self.conversation_history
                 
                 response = openai_client.chat.completions.create(
-                    model=REALTIME_CONFIG["gpt"]["model"],
+                    model=HANDS_FREE_CONFIG["gpt"]["model"],
                     messages=messages,
-                    max_tokens=REALTIME_CONFIG["gpt"]["max_tokens"],
-                    temperature=REALTIME_CONFIG["gpt"]["temperature"]
+                    max_tokens=HANDS_FREE_CONFIG["gpt"]["max_tokens"],
+                    temperature=HANDS_FREE_CONFIG["gpt"]["temperature"]
                 )
                 
                 return response.choices[0].message.content.strip()
                 
             except Exception as e:
-                logger.error(f"GPT error: {e}")
-                return "Извините, произошла ошибка. Попробуйте еще раз."
+                logger.error(f"GPT ошибка: {e}")
+                return "Извините, не расслышал. Повторите, пожалуйста."
         
-        # Выполняем в отдельном потоке
-        response_text = await asyncio.get_event_loop().run_in_executor(
-            self.executor, gpt_call
-        )
-        
-        latency_ms = (time.time() - start_time) * 1000
-        self.metrics.llm_latency_ms = latency_ms
+        response = await asyncio.get_event_loop().run_in_executor(self.executor, gpt_call)
         
         # Добавляем ответ в историю
-        self.conversation_history.append({
-            "role": "assistant", 
-            "content": response_text
-        })
+        self.conversation_history.append({"role": "assistant", "content": response})
         
-        logger.info(f"🧠 LLM completed ({latency_ms:.0f}ms): {response_text}")
-        return response_text
+        return response
     
-    async def _run_tts_synthesis(self, text: str):
-        """Запускает TTS синтез с потоковой передачей"""
+    async def _run_tts_and_play(self, text: str):
+        """TTS и воспроизведение с возможностью перебивания"""
         
-        start_time = time.time()
         await self._update_state(ConversationState.SPEAKING)
         
-        # Уведомляем о начале TTS
-        await self._send_event("tts_started", {
-            "text": text,
-            "timestamp": time.time()
-        })
+        # Устанавливаем эхо-подавление
+        self.vad.set_echo_suppression(HANDS_FREE_CONFIG["echo_suppression_duration_ms"])
+        
+        # Сброс детекции перебивания
+        self.vad.reset_interrupt_detection()
         
         def tts_call():
             try:
-                # Создаем временный файл для TTS
                 with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
                     temp_path = temp_file.name
                 
+                response = openai_client.audio.speech.create(
+                    model=HANDS_FREE_CONFIG["tts"]["model"],
+                    voice=HANDS_FREE_CONFIG["tts"]["voice"],
+                    input=text,
+                    speed=HANDS_FREE_CONFIG["tts"]["speed"],
+                    response_format=HANDS_FREE_CONFIG["tts"]["response_format"]
+                )
+                
+                response.stream_to_file(temp_path)
+                
+                with open(temp_path, 'rb') as audio_file:
+                    audio_content = audio_file.read()
+                
                 try:
-                    # Вызов TTS API
-                    response = openai_client.audio.speech.create(
-                        model=REALTIME_CONFIG["tts"]["model"],
-                        voice=REALTIME_CONFIG["tts"]["voice"],
-                        input=text,
-                        speed=REALTIME_CONFIG["tts"]["speed"],
-                        response_format=REALTIME_CONFIG["tts"]["response_format"]
-                    )
+                    os.unlink(temp_path)
+                except:
+                    pass
                     
-                    # Сохраняем аудио
-                    response.stream_to_file(temp_path)
-                    
-                    # Читаем аудио файл
-                    with open(temp_path, 'rb') as audio_file:
-                        audio_content = audio_file.read()
-                    
-                    return audio_content
-                    
-                finally:
-                    # Удаляем временный файл
-                    try:
-                        os.unlink(temp_path)
-                    except:
-                        pass
-                        
+                return audio_content
+                
             except Exception as e:
-                logger.error(f"TTS error: {e}")
+                logger.error(f"TTS ошибка: {e}")
                 return b""
         
-        # Выполняем TTS в отдельном потоке
-        audio_content = await asyncio.get_event_loop().run_in_executor(
-            self.executor, tts_call
-        )
+        # Генерируем TTS
+        audio_content = await asyncio.get_event_loop().run_in_executor(self.executor, tts_call)
         
-        latency_ms = (time.time() - start_time) * 1000
-        self.metrics.tts_latency_ms = latency_ms
-        
-        if audio_content:
-            # Отправляем аудио чанками
-            await self._stream_tts_audio(audio_content)
-            
-        logger.info(f"🔊 TTS completed ({latency_ms:.0f}ms)")
-        
-        # Уведомляем о завершении
-        await self._send_event("tts_complete", {
-            "latency_ms": latency_ms,
-            "audio_size": len(audio_content)
-        })
+        if audio_content and self.state == ConversationState.SPEAKING:
+            # Потоковое воспроизведение
+            await self._stream_audio_with_interruption(audio_content)
     
-    async def _stream_tts_audio(self, audio_content: bytes):
-        """Потоковая передача TTS аудио"""
+    async def _stream_audio_with_interruption(self, audio_content: bytes):
+        """Потоковое воспроизведение с проверкой перебивания"""
         
-        chunk_size = 8192  # 8KB чанки
+        chunk_size = 4096
         total_chunks = (len(audio_content) + chunk_size - 1) // chunk_size
         
-        logger.info(f"📤 Streaming {len(audio_content)} bytes in {total_chunks} chunks")
+        await self._send_event("tts_start", {
+            "total_chunks": total_chunks,
+            "total_size": len(audio_content)
+        })
         
         for i in range(0, len(audio_content), chunk_size):
+            # Проверяем состояние - могли перебить
+            if self.state != ConversationState.SPEAKING:
+                logger.info("Воспроизведение прервано")
+                break
+                
             chunk = audio_content[i:i + chunk_size]
             chunk_id = i // chunk_size + 1
             
@@ -596,36 +657,119 @@ class RealtimeConversationSession:
                 "is_final": chunk_id == total_chunks
             })
             
-            # Небольшая задержка между чанками для smooth playback
-            await asyncio.sleep(0.01)
+            # Небольшая задержка между чанками
+            await asyncio.sleep(0.02)
+        
+        if self.state == ConversationState.SPEAKING:
+            await self._send_event("tts_complete", {"interrupted": False})
     
-    async def handle_interruption(self):
+    async def _handle_interruption(self, vad_result: Dict[str, Any]):
         """Обработка перебивания пользователем"""
         
-        if self.state not in [ConversationState.SPEAKING, ConversationState.PROCESSING_TTS]:
-            return
-            
-        logger.info("⚡ Handling user interruption")
+        logger.info("⚡ Обрабатываем перебивание")
         self.interruptions_count += 1
         
-        # Переходим в состояние прерывания
+        # Останавливаем воспроизведение
+        if self.current_playback_task and not self.current_playback_task.done():
+            self.current_playback_task.cancel()
+        
         await self._update_state(ConversationState.INTERRUPTED)
         
-        # Уведомляем клиента о прерывании
         await self._send_event("interrupted", {
-            "timestamp": time.time(),
-            "previous_state": self.state.value
+            "timestamp": vad_result["timestamp"],
+            "amplitude": vad_result.get("interrupt_amplitude", 0),
+            "interruptions_count": self.interruptions_count
         })
         
-        # Очищаем аудио буфер
-        self.audio_processor.clear_buffer()
-        
-        # Быстро переходим к прослушиванию
+        # Быстро переходим к прослушиванию нового сообщения
         await asyncio.sleep(0.1)
-        await self._update_state(ConversationState.IDLE)
+        await self._update_state(ConversationState.LISTENING)
+        
+        # Сброс эхо-подавления при перебивании
+        self.vad.echo_suppression_until = 0
+    
+    async def pause_session(self):
+        """Приостановка сессии"""
+        self.is_active = False
+        await self._update_state(ConversationState.PAUSED)
+        await self._send_event("session_paused", {"timestamp": time.time()})
+    
+    async def resume_session(self):
+        """Возобновление сессии"""
+        self.is_active = True
+        await self._update_state(ConversationState.LISTENING)
+        await self._send_event("session_resumed", {"timestamp": time.time()})
+    
+    async def close(self):
+        """Закрытие сессии"""
+        self.is_active = False
+        
+        # Отменяем активные задачи
+        if self.current_processing_task and not self.current_processing_task.done():
+            self.current_processing_task.cancel()
+        if self.current_playback_task and not self.current_playback_task.done():
+            self.current_playback_task.cancel()
+        
+        self.executor.shutdown(wait=False)
+        
+        # Статистика
+        await self._send_event("session_stats", {
+            "total_exchanges": self.total_exchanges,
+            "interruptions_count": self.interruptions_count,
+            "false_positives": self.false_positives,
+            "session_duration": time.time() - self.last_interaction
+        })
+        
+        logger.info(f"🔚 Hands-free сессия закрыта: {self.session_id}")
+    
+    def _calculate_amplitude(self, audio_data: bytes) -> float:
+        """Вычисление амплитуды аудио"""
+        if len(audio_data) < 2:
+            return 0.0
+            
+        try:
+            # Предполагаем 16-bit PCM
+            sample_count = len(audio_data) // 2
+            if sample_count == 0:
+                return 0.0
+                
+            samples = [int.from_bytes(audio_data[i:i+2], byteorder='little', signed=True) 
+                      for i in range(0, len(audio_data), 2)]
+            
+            rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
+            return rms / 32768.0  # Нормализация к 0-1
+            
+        except Exception as e:
+            logger.warning(f"Ошибка расчета амплитуды: {e}")
+            return 0.0
+    
+    def _convert_to_wav(self, audio_data: bytes) -> bytes:
+        """Конвертация аудио в WAV формат"""
+        try:
+            # Если уже WAV - возвращаем как есть
+            if audio_data.startswith(b'RIFF') and b'WAVE' in audio_data[:20]:
+                return audio_data
+            
+            # Создаем WAV из сырых данных
+            sample_rate = HANDS_FREE_CONFIG["sample_rate"]
+            channels = HANDS_FREE_CONFIG["channels"]
+            
+            wav_buffer = io.BytesIO()
+            
+            with wave.open(wav_buffer, 'wb') as wav_file:
+                wav_file.setnchannels(channels)
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(audio_data)
+            
+            return wav_buffer.getvalue()
+            
+        except Exception as e:
+            logger.error(f"Ошибка конвертации в WAV: {e}")
+            return audio_data
     
     async def _update_state(self, new_state: ConversationState):
-        """Обновляет состояние сессии"""
+        """Обновление состояния"""
         old_state = self.state
         self.state = new_state
         
@@ -635,10 +779,10 @@ class RealtimeConversationSession:
             "timestamp": time.time()
         })
         
-        logger.info(f"🔄 State: {old_state.value} → {new_state.value}")
+        logger.debug(f"🔄 Состояние: {old_state.value} → {new_state.value}")
     
     async def _send_event(self, event_type: str, data: Dict[str, Any] = None):
-        """Отправляет событие клиенту"""
+        """Отправка события клиенту"""
         try:
             message = {
                 "type": event_type,
@@ -652,57 +796,51 @@ class RealtimeConversationSession:
             await self.websocket.send_json(message)
             
         except Exception as e:
-            logger.warning(f"Failed to send event {event_type}: {e}")
+            logger.warning(f"Ошибка отправки события {event_type}: {e}")
     
-    async def get_session_stats(self) -> Dict[str, Any]:
-        """Возвращает статистику сессии"""
-        return {
-            "session_id": self.session_id,
-            "current_state": self.state.value,
-            "total_interactions": self.total_interactions,
-            "interruptions_count": self.interruptions_count,
-            "conversation_length": len(self.conversation_history),
-            "metrics": {
-                "avg_stt_latency_ms": self.metrics.stt_latency_ms,
-                "avg_llm_latency_ms": self.metrics.llm_latency_ms,
-                "avg_tts_latency_ms": self.metrics.tts_latency_ms,
-                "avg_total_latency_ms": self.metrics.total_latency_ms
-            }
-        }
-    
-    async def close(self):
-        """Закрывает сессию"""
-        logger.info(f"🔚 Closing session: {self.session_id}")
-        self.executor.shutdown(wait=False)
+    async def _send_audio_status(self, vad_result: Dict[str, Any]):
+        """Отправка статуса аудио (периодически)"""
+        await self._send_event("audio_status", {
+            "amplitude": vad_result.get("amplitude", 0),
+            "smooth_amplitude": vad_result.get("smooth_amplitude", 0),
+            "is_speech_active": vad_result.get("is_speech_active", False),
+            "is_echo_suppressed": vad_result.get("is_echo_suppressed", False),
+            "state": self.state.value
+        })
 
 # ===== SESSION MANAGER =====
 
-class SessionManager:
-    """Управляет активными сессиями"""
+class HandsFreeSessionManager:
+    """Менеджер hands-free сессий"""
     
     def __init__(self):
-        self.sessions: Dict[str, RealtimeConversationSession] = {}
+        self.sessions: Dict[str, HandsFreeSession] = {}
     
-    async def create_session(self, websocket: WebSocket) -> RealtimeConversationSession:
+    async def create_session(self, websocket: WebSocket) -> HandsFreeSession:
         session_id = str(uuid.uuid4())
-        session = RealtimeConversationSession(session_id, websocket)
+        session = HandsFreeSession(session_id, websocket)
         self.sessions[session_id] = session
         
-        logger.info(f"✅ Session created: {session_id}")
+        await session.initialize()
+        
+        logger.info(f"✅ Создана hands-free сессия: {session_id}")
         return session
     
     async def close_session(self, session_id: str):
         if session_id in self.sessions:
             await self.sessions[session_id].close()
             del self.sessions[session_id]
-            logger.info(f"🗑️ Session removed: {session_id}")
+            logger.info(f"🗑️ Удалена сессия: {session_id}")
+    
+    def get_active_sessions_count(self) -> int:
+        return len([s for s in self.sessions.values() if s.is_active])
 
 # ===== FASTAPI APPLICATION =====
 
 app = FastAPI(
-    title="Real-time Voice Assistant v5.0",
-    description="Streaming STT + LLM + TTS voice assistant",
-    version="5.0.0"
+    title="Hands-Free Voice Assistant v6.0",
+    description="Real-time voice assistant с режимом телефонного разговора",
+    version="6.0.0"
 )
 
 app.add_middleware(
@@ -713,10 +851,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Глобальный менеджер сессий
-session_manager = SessionManager()
-
-# ===== ROUTES =====
+session_manager = HandsFreeSessionManager()
 
 @app.get("/")
 async def get_homepage():
@@ -726,138 +861,313 @@ async def get_homepage():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Voice Assistant v5.0</title>
+    <title>Hands-Free Voice Assistant v6.0</title>
     <style>
         body {
-            font-family: system-ui, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             margin: 0;
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             color: white;
+            overflow: hidden;
         }
+        
         .container {
             text-align: center;
             background: rgba(255,255,255,0.1);
-            padding: 2rem;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
+            padding: 3rem;
+            border-radius: 30px;
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.2);
+            max-width: 500px;
+            width: 100%;
         }
-        h1 { font-size: 2.5rem; margin-bottom: 1rem; }
-        .status { font-size: 1.2rem; margin: 1rem 0; }
-        .voice-button {
-            width: 120px;
-            height: 120px;
+        
+        h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(45deg, #fff, #a8c8ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            font-size: 1.1rem;
+            margin-bottom: 2rem;
+            opacity: 0.9;
+        }
+        
+        .main-button {
+            width: 160px;
+            height: 160px;
             border-radius: 50%;
             border: none;
             background: linear-gradient(135deg, #ff6b6b, #ee5a24);
             color: white;
-            font-size: 3rem;
+            font-size: 3.5rem;
             cursor: pointer;
-            margin: 2rem auto;
+            margin: 1.5rem auto;
             display: block;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            transition: all 0.4s ease;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            position: relative;
+            overflow: hidden;
         }
-        .voice-button:hover {
+        
+        .main-button:hover {
             transform: scale(1.05);
-            box-shadow: 0 15px 40px rgba(0,0,0,0.4);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.4);
         }
-        .voice-button.listening {
+        
+        .main-button.active {
             background: linear-gradient(135deg, #74b9ff, #0984e3);
-            animation: pulse 1.5s infinite;
+            animation: pulse-active 2s infinite;
         }
-        .voice-button.processing {
-            background: linear-gradient(135deg, #fdcb6e, #e17055);
-            animation: spin 1s linear infinite;
-        }
-        .voice-button.speaking {
+        
+        .main-button.speaking {
             background: linear-gradient(135deg, #00b894, #00a085);
-            animation: wave 1s ease-in-out infinite;
+            animation: wave-speaking 0.8s ease-in-out infinite;
         }
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
+        
+        .main-button.processing {
+            background: linear-gradient(135deg, #fdcb6e, #e17055);
+            animation: spin-processing 1.2s linear infinite;
         }
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+        
+        @keyframes pulse-active {
+            0%, 100% { transform: scale(1); box-shadow: 0 20px 40px rgba(116, 185, 255, 0.4); }
+            50% { transform: scale(1.08); box-shadow: 0 30px 60px rgba(116, 185, 255, 0.6); }
         }
-        @keyframes wave {
+        
+        @keyframes wave-speaking {
             0%, 100% { transform: scale(1); }
             25% { transform: scale(1.05); }
             75% { transform: scale(0.95); }
         }
-        .conversation {
-            max-width: 600px;
-            margin: 2rem auto;
+        
+        @keyframes spin-processing {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .status {
+            font-size: 1.3rem;
+            margin: 1.5rem 0;
+            min-height: 1.6rem;
+            font-weight: 500;
+        }
+        
+        .audio-visualizer {
+            height: 60px;
             background: rgba(255,255,255,0.1);
+            border-radius: 30px;
+            margin: 2rem 0;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .audio-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #74b9ff, #0984e3, #74b9ff);
+            width: 0%;
+            border-radius: 30px;
+            transition: width 0.1s ease;
+            position: relative;
+        }
+        
+        .audio-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: shine 2s infinite;
+        }
+        
+        @keyframes shine {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+        
+        .stats {
+            margin-top: 2rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .stat-item {
+            background: rgba(255,255,255,0.1);
+            padding: 1rem;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .stat-value {
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: #74b9ff;
+        }
+        
+        .controls {
+            margin: 1.5rem 0;
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+        }
+        
+        .control-btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        .control-btn.active {
+            background: #74b9ff;
+        }
+        
+        .conversation {
+            margin-top: 2rem;
+            max-height: 200px;
+            overflow-y: auto;
+            text-align: left;
+            background: rgba(0,0,0,0.2);
             border-radius: 15px;
             padding: 1rem;
-            max-height: 300px;
-            overflow-y: auto;
         }
+        
         .message {
             margin: 0.5rem 0;
-            padding: 0.5rem 1rem;
-            border-radius: 10px;
-        }
-        .user { background: rgba(116, 185, 255, 0.3); text-align: right; }
-        .assistant { background: rgba(0, 184, 148, 0.3); text-align: left; }
-        .metrics {
+            padding: 0.5rem;
+            border-radius: 8px;
             font-size: 0.9rem;
-            opacity: 0.8;
-            margin-top: 1rem;
+        }
+        
+        .message.user {
+            background: rgba(116, 185, 255, 0.3);
+            text-align: right;
+        }
+        
+        .message.assistant {
+            background: rgba(0, 184, 148, 0.3);
+        }
+        
+        .connection-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+            transition: all 0.3s;
+        }
+        
+        .connection-indicator.connected {
+            background: #10b981;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎤 Real-time Voice Assistant</h1>
-        <div class="status" id="status">Нажмите для начала разговора</div>
+        <div class="connection-indicator" id="connectionStatus"></div>
         
-        <button class="voice-button" id="voiceBtn">🎤</button>
+        <h1>🎤 Алиса Hands-Free</h1>
+        <p class="subtitle">Разговор без кнопок • Перебивание • Реальное время</p>
         
-        <div class="conversation" id="conversation"></div>
+        <button class="main-button" id="mainButton">📞</button>
         
-        <div class="metrics" id="metrics"></div>
+        <div class="status" id="status">Нажмите чтобы начать разговор</div>
+        
+        <div class="audio-visualizer">
+            <div class="audio-bar" id="audioBar"></div>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" id="pauseBtn">⏸️ Пауза</button>
+            <button class="control-btn" id="muteBtn">🔇 Тишина</button>
+            <button class="control-btn active" id="autoBtn">🤖 Авто</button>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="exchangeCount">0</div>
+                <div>Обменов</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="interruptCount">0</div>
+                <div>Перебиваний</div>
+            </div>
+        </div>
+        
+        <div class="conversation" id="conversation">
+            <div style="text-align: center; opacity: 0.7; font-style: italic;">
+                Начните разговор...
+            </div>
+        </div>
     </div>
 
     <script>
-        class RealtimeVoiceClient {
+        class HandsFreeVoiceAssistant {
             constructor() {
                 this.ws = null;
                 this.mediaRecorder = null;
-                this.audioChunks = [];
-                this.isConnected = false;
-                this.isRecording = false;
-                this.currentState = 'idle';
+                this.isActive = false;
+                this.isPaused = false;
+                this.currentState = 'initializing';
+                
+                this.totalExchanges = 0;
+                this.totalInterruptions = 0;
                 
                 this.initElements();
-                this.connect();
+                this.connectWebSocket();
             }
             
             initElements() {
-                this.voiceBtn = document.getElementById('voiceBtn');
+                this.mainButton = document.getElementById('mainButton');
                 this.status = document.getElementById('status');
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.audioBar = document.getElementById('audioBar');
                 this.conversation = document.getElementById('conversation');
-                this.metrics = document.getElementById('metrics');
+                this.exchangeCount = document.getElementById('exchangeCount');
+                this.interruptCount = document.getElementById('interruptCount');
                 
-                this.voiceBtn.addEventListener('click', () => this.toggleRecording());
+                this.pauseBtn = document.getElementById('pauseBtn');
+                this.muteBtn = document.getElementById('muteBtn');
+                this.autoBtn = document.getElementById('autoBtn');
+                
+                // События
+                this.mainButton.addEventListener('click', () => this.toggleSession());
+                this.pauseBtn.addEventListener('click', () => this.togglePause());
+                this.muteBtn.addEventListener('click', () => this.toggleMute());
             }
             
-            connect() {
+            connectWebSocket() {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
+                const wsUrl = `${protocol}//${window.location.host}/ws/hands-free`;
                 
                 this.ws = new WebSocket(wsUrl);
                 
                 this.ws.onopen = () => {
-                    this.isConnected = true;
-                    this.status.textContent = 'Подключено! Готов к работе';
-                    console.log('🔗 Connected to voice assistant');
+                    console.log('🔗 Подключено к hands-free ассистенту');
+                    this.connectionStatus.classList.add('connected');
+                    this.status.textContent = 'Подключено! Нажмите для начала разговора';
                 };
                 
                 this.ws.onmessage = (event) => {
@@ -866,72 +1176,73 @@ async def get_homepage():
                 };
                 
                 this.ws.onclose = () => {
-                    this.isConnected = false;
-                    this.status.textContent = 'Соединение потеряно';
-                    console.log('❌ Disconnected from voice assistant');
+                    console.log('❌ Соединение потеряно');
+                    this.connectionStatus.classList.remove('connected');
+                    this.status.textContent = 'Соединение потеряно - перезагрузите страницу';
+                    this.isActive = false;
+                    this.updateUI();
                 };
             }
             
-            async toggleRecording() {
-                if (!this.isConnected) {
-                    this.status.textContent = 'Нет соединения с сервером';
-                    return;
-                }
-                
-                if (this.isRecording) {
-                    this.stopRecording();
+            async toggleSession() {
+                if (this.isActive) {
+                    await this.stopSession();
                 } else {
-                    await this.startRecording();
+                    await this.startSession();
                 }
             }
             
-            async startRecording() {
+            async startSession() {
                 try {
                     const stream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             sampleRate: 16000,
                             channelCount: 1,
                             echoCancellation: true,
-                            noiseSuppression: true
+                            noiseSuppression: true,
+                            autoGainControl: true
                         }
                     });
                     
                     this.mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm',
+                        mimeType: 'audio/webm;codecs=opus',
                         audioBitsPerSecond: 16000
                     });
                     
                     this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) {
+                        if (event.data.size > 0 && this.isActive) {
                             this.sendAudioChunk(event.data);
                         }
                     };
                     
-                    this.mediaRecorder.start(100); // 100ms chunks
-                    this.isRecording = true;
+                    this.mediaRecorder.start(100); // 100ms чанки
+                    this.isActive = true;
                     this.updateUI();
-                    this.status.textContent = 'Слушаю... (нажмите чтобы остановить)';
                     
                 } catch (error) {
-                    console.error('Recording error:', error);
-                    this.status.textContent = `Ошибка микрофона: ${error.message}`;
+                    console.error('Ошибка доступа к микрофону:', error);
+                    this.status.textContent = 'Ошибка доступа к микрофону: ' + error.message;
                 }
             }
             
-            stopRecording() {
+            async stopSession() {
+                this.isActive = false;
+                
                 if (this.mediaRecorder) {
                     this.mediaRecorder.stop();
                     this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
                     this.mediaRecorder = null;
                 }
                 
-                this.isRecording = false;
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: 'stop_session' }));
+                }
+                
                 this.updateUI();
-                this.status.textContent = 'Обработка...';
             }
             
             async sendAudioChunk(audioBlob) {
-                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.isActive) return;
                 
                 try {
                     const arrayBuffer = await audioBlob.arrayBuffer();
@@ -944,17 +1255,33 @@ async def get_homepage():
                     }));
                     
                 } catch (error) {
-                    console.error('Error sending audio chunk:', error);
+                    console.error('Ошибка отправки аудио:', error);
                 }
             }
             
             handleMessage(data) {
-                console.log('📨 Received:', data.type, data);
-                
                 switch (data.type) {
+                    case 'session_ready':
+                        this.status.textContent = 'Слушаю... Говорите в любое время!';
+                        break;
+                        
                     case 'state_changed':
                         this.currentState = data.new_state;
                         this.updateUI();
+                        this.updateStatus(data.new_state);
+                        break;
+                        
+                    case 'audio_status':
+                        this.updateAudioVisualizer(data);
+                        break;
+                        
+                    case 'speech_detection':
+                        if (data.type === 'started') {
+                            this.status.textContent = '🎤 Слышу вас...';
+                        } else if (data.type === 'ended') {
+                            this.status.textContent = data.will_process ? 
+                                '⚙️ Обрабатываю...' : '⏳ Слишком коротко, слушаю дальше...';
+                        }
                         break;
                         
                     case 'transcription':
@@ -965,42 +1292,81 @@ async def get_homepage():
                         this.addMessage('assistant', data.text);
                         break;
                         
-                    case 'pipeline_complete':
-                        this.updateMetrics(data);
-                        this.status.textContent = 'Готов к работе';
+                    case 'processing_complete':
+                        this.totalExchanges = data.total_exchanges || this.totalExchanges + 1;
+                        this.exchangeCount.textContent = this.totalExchanges;
+                        break;
+                        
+                    case 'interrupted':
+                        this.totalInterruptions = data.interruptions_count || this.totalInterruptions + 1;
+                        this.interruptCount.textContent = this.totalInterruptions;
+                        this.status.textContent = '⚡ Перебили! Слушаю вас...';
+                        break;
+                        
+                    case 'tts_start':
+                        this.status.textContent = '🔊 Говорю... (можете перебить)';
                         break;
                         
                     case 'error':
-                        this.status.textContent = `Ошибка: ${data.message}`;
+                        this.status.textContent = '❌ ' + data.message;
                         break;
                 }
             }
             
-            updateUI() {
-                this.voiceBtn.className = 'voice-button';
+            updateStatus(state) {
+                const statusMap = {
+                    'listening': '👂 Слушаю...',
+                    'speech_detected': '🎤 Слышу речь...',
+                    'processing': '⚙️ Думаю...',
+                    'speaking': '🔊 Отвечаю...',
+                    'interrupted': '⚡ Перебили!',
+                    'paused': '⏸️ На паузе'
+                };
                 
-                if (this.isRecording) {
-                    this.voiceBtn.classList.add('listening');
-                    this.voiceBtn.textContent = '⏹️';
+                if (statusMap[state]) {
+                    this.status.textContent = statusMap[state];
+                }
+            }
+            
+            updateAudioVisualizer(data) {
+                const amplitude = data.smooth_amplitude || 0;
+                const percentage = Math.min(amplitude * 1000, 100); // Усиливаем для визуализации
+                this.audioBar.style.width = percentage + '%';
+            }
+            
+            updateUI() {
+                this.mainButton.className = 'main-button';
+                
+                if (!this.isActive) {
+                    this.mainButton.textContent = '📞';
+                    this.status.textContent = 'Нажмите для начала разговора';
                 } else {
                     switch (this.currentState) {
-                        case 'processing_stt':
-                        case 'processing_llm':
-                        case 'processing_tts':
-                            this.voiceBtn.classList.add('processing');
-                            this.voiceBtn.textContent = '⚙️';
+                        case 'listening':
+                        case 'speech_detected':
+                            this.mainButton.classList.add('active');
+                            this.mainButton.textContent = '🎤';
+                            break;
+                        case 'processing':
+                            this.mainButton.classList.add('processing');
+                            this.mainButton.textContent = '⚙️';
                             break;
                         case 'speaking':
-                            this.voiceBtn.classList.add('speaking');
-                            this.voiceBtn.textContent = '🔊';
+                            this.mainButton.classList.add('speaking');
+                            this.mainButton.textContent = '🔊';
                             break;
                         default:
-                            this.voiceBtn.textContent = '🎤';
+                            this.mainButton.classList.add('active');
+                            this.mainButton.textContent = '📞';
                     }
                 }
             }
             
             addMessage(role, text) {
+                if (this.conversation.innerHTML.includes('Начните разговор')) {
+                    this.conversation.innerHTML = '';
+                }
+                
                 const messageDiv = document.createElement('div');
                 messageDiv.className = `message ${role}`;
                 messageDiv.textContent = text;
@@ -1009,20 +1375,27 @@ async def get_homepage():
                 this.conversation.scrollTop = this.conversation.scrollHeight;
             }
             
-            updateMetrics(data) {
-                this.metrics.innerHTML = `
-                    <strong>Последняя обработка:</strong><br>
-                    STT: ${data.stt_latency_ms?.toFixed(0)}ms | 
-                    LLM: ${data.llm_latency_ms?.toFixed(0)}ms | 
-                    TTS: ${data.tts_latency_ms?.toFixed(0)}ms<br>
-                    <strong>Общее время: ${data.total_latency_ms?.toFixed(0)}ms</strong>
-                `;
+            togglePause() {
+                this.isPaused = !this.isPaused;
+                this.pauseBtn.classList.toggle('active', this.isPaused);
+                this.pauseBtn.textContent = this.isPaused ? '▶️ Возобновить' : '⏸️ Пауза';
+                
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: this.isPaused ? 'pause_session' : 'resume_session'
+                    }));
+                }
+            }
+            
+            toggleMute() {
+                // Реализация отключения звука
+                console.log('Mute toggle - пока не реализовано');
             }
         }
         
-        // Запускаем приложение
+        // Запуск приложения
         document.addEventListener('DOMContentLoaded', () => {
-            window.voiceClient = new RealtimeVoiceClient();
+            window.assistant = new HandsFreeVoiceAssistant();
         });
     </script>
 </body>
@@ -1033,17 +1406,16 @@ async def get_homepage():
 async def health_check():
     return JSONResponse({
         "status": "healthy",
-        "version": "5.0.0",
-        "description": "Real-time Voice Assistant with streaming STT+LLM+TTS",
-        "active_sessions": len(session_manager.sessions)
+        "version": "6.0.0",
+        "description": "Hands-Free Voice Assistant",
+        "active_sessions": session_manager.get_active_sessions_count(),
+        "features": ["continuous_listening", "interruption_support", "echo_suppression"]
     })
 
-# ===== WEBSOCKET ENDPOINT =====
-
-@app.websocket("/ws/voice")
-async def websocket_voice_endpoint(websocket: WebSocket):
+@app.websocket("/ws/hands-free")
+async def websocket_hands_free_endpoint(websocket: WebSocket):
     """
-    Главный WebSocket endpoint для голосового взаимодействия
+    Главный WebSocket endpoint для hands-free режима
     """
     await websocket.accept()
     
@@ -1055,45 +1427,40 @@ async def websocket_voice_endpoint(websocket: WebSocket):
             message_type = message.get("type")
             
             if message_type == "audio_chunk":
-                # Обрабатываем аудио чанк
+                # Непрерывная обработка аудио
                 audio_data = bytes(message["data"])
                 await session.process_audio_chunk(audio_data)
                 
-            elif message_type == "interrupt":
-                # Обрабатываем перебивание
-                await session.handle_interruption()
+            elif message_type == "pause_session":
+                await session.pause_session()
                 
-            elif message_type == "get_stats":
-                # Отправляем статистику
-                stats = await session.get_session_stats()
-                await websocket.send_json({
-                    "type": "session_stats",
-                    **stats
-                })
+            elif message_type == "resume_session":
+                await session.resume_session()
+                
+            elif message_type == "stop_session":
+                break
             
             else:
-                logger.warning(f"Unknown message type: {message_type}")
+                logger.warning(f"Неизвестный тип сообщения: {message_type}")
     
     except WebSocketDisconnect:
-        logger.info(f"Client disconnected: {session.session_id}")
+        logger.info(f"Клиент отключился: {session.session_id}")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        logger.error(f"WebSocket ошибка: {e}")
     finally:
         await session_manager.close_session(session.session_id)
 
-# ===== STARTUP =====
-
 def main():
-    logger.info("🚀 Starting Real-time Voice Assistant v5.0")
-    logger.info("📋 Configuration:")
-    logger.info(f"   - Audio chunk duration: {REALTIME_CONFIG['audio_chunk_duration_ms']}ms")
-    logger.info(f"   - Silence duration: {REALTIME_CONFIG['silence_duration_ms']}ms")
-    logger.info(f"   - VAD threshold: {REALTIME_CONFIG['silence_threshold']}")
-    logger.info(f"   - Whisper model: {REALTIME_CONFIG['whisper']['model']}")
-    logger.info(f"   - GPT model: {REALTIME_CONFIG['gpt']['model']}")
-    logger.info(f"   - TTS model: {REALTIME_CONFIG['tts']['model']} ({REALTIME_CONFIG['tts']['voice']})")
+    logger.info("🚀 Запуск Hands-Free Voice Assistant v6.0")
+    logger.info("📋 Режим 'телефонного разговора':")
+    logger.info("   - Постоянная прослушка микрофона")
+    logger.info("   - Автоматическое определение речи")
+    logger.info("   - Поддержка перебивания")
+    logger.info("   - Эхо-подавление")
+    logger.info(f"   - VAD порог: {HANDS_FREE_CONFIG['vad_threshold']}")
+    logger.info(f"   - Порог перебивания: {HANDS_FREE_CONFIG['interrupt_threshold']}")
     
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 10000))
     uvicorn.run(
         app,
         host="0.0.0.0",
