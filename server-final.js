@@ -157,7 +157,8 @@ function getSignedUrl() {
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat/1.0'
+        'User-Agent': 'ElevenLabs-Voice-Chat/1.0',
+        'Content-Type': 'application/json'
       },
       timeout: 10000 // 10 second timeout
     };
