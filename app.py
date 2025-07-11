@@ -1,14 +1,11 @@
 """
-🎤 Hands-Free Real-time Voice Assistant v6.0
-Режим "телефонного разговора" - без кнопок, с перебиванием
-
-Особенности:
-- Постоянная прослушка микрофона
-- Автоматическое определение речи (VAD)
-- Перебивание ассистента во время говорения
-- Подавление эха собственного голоса
-- Умное управление очередями аудио
-- Бесшовные переходы между состояниями
+🎤 Hands-Free Real-time Voice Assistant v6.1 - ИСПРАВЛЕННАЯ ВЕРСИЯ
+Исправления:
+- Правильная логика детекции перебивания (только в состоянии SPEAKING)
+- Дебаунсинг для предотвращения спама
+- Улучшенные пороги VAD
+- Четкое разделение логики состояний
+- Подробное логирование для отладки
 """
 
 import asyncio
@@ -49,52 +46,53 @@ if not OPENAI_API_KEY:
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Конфигурация для hands-free режима
+# ИСПРАВЛЕННАЯ конфигурация для стабильной работы
 HANDS_FREE_CONFIG = {
     # Аудио настройки
-    "audio_chunk_duration_ms": 100,     # Частые чанки для быстрой реакции
-    "sample_rate": 16000,               # Стандартный sample rate
-    "channels": 1,                      # Моно
+    "audio_chunk_duration_ms": 100,
+    "sample_rate": 16000,
+    "channels": 1,
     
-    # VAD настройки
-    "vad_threshold": 0.008,             # Порог детекции голоса
-    "vad_hang_time_ms": 600,            # Время "висения" после тишины
-    "vad_attack_time_ms": 150,          # Время подтверждения начала речи
-    "min_speech_duration_ms": 400,      # Минимальная длительность речи
-    "max_speech_duration_ms": 30000,    # Максимальная длительность речи
+    # ИСПРАВЛЕННЫЕ VAD настройки - более консервативные
+    "vad_threshold": 0.015,              # Увеличен для уменьшения ложных срабатываний
+    "vad_hang_time_ms": 800,             # Больше времени до завершения речи
+    "vad_attack_time_ms": 300,           # Больше времени подтверждения начала речи
+    "min_speech_duration_ms": 600,       # Минимальная длительность речи
+    "max_speech_duration_ms": 25000,     # Максимальная длительность речи
     
-    # Перебивание
-    "interrupt_threshold": 0.012,       # Порог для перебивания (выше обычного)
-    "interrupt_confirmation_ms": 200,   # Время подтверждения перебивания
-    "interrupt_fade_out_ms": 100,       # Время затухания при перебивании
+    # ИСПРАВЛЕННЫЕ настройки перебивания
+    "interrupt_threshold": 0.025,        # Значительно выше обычного порога
+    "interrupt_confirmation_ms": 500,    # Длительное подтверждение
+    "interrupt_cooldown_ms": 1000,       # Защита от спама перебивания
+    "interrupt_min_speaking_time_ms": 1000,  # Минимальное время говорения до возможности перебить
     
     # Эхо-подавление
-    "echo_suppression_duration_ms": 1500,  # Время подавления эха после TTS
-    "echo_suppression_factor": 0.4,        # Фактор снижения чувствительности
+    "echo_suppression_duration_ms": 2000,   # Увеличено время подавления
+    "echo_suppression_factor": 0.3,         # Сильнее подавление
     
     # Буферизация
-    "audio_buffer_size": 50,            # Размер кольцевого буфера
-    "processing_overlap_ms": 200,       # Перекрытие для плавности
+    "audio_buffer_size": 50,
+    "processing_overlap_ms": 200,
     
     # OpenAI настройки
     "whisper": {
         "model": "whisper-1",
         "language": "ru",
         "temperature": 0.0,
-        "prompt": "Разговор с голосовым ассистентом. Пользователь может перебивать."
+        "prompt": "Разговор с голосовым ассистентом. Четкая речь пользователя."
     },
     
     "gpt": {
         "model": "gpt-4o-mini",
-        "max_tokens": 100,               # Короткие ответы для диалога
-        "temperature": 0.8,              # Более живой диалог
+        "max_tokens": 100,
+        "temperature": 0.8,
         "stream": False
     },
     
     "tts": {
         "model": "tts-1",
         "voice": "alloy",
-        "speed": 1.1,                    # Чуть быстрее для динамичности
+        "speed": 1.1,
         "response_format": "mp3"
     }
 }
@@ -102,14 +100,14 @@ HANDS_FREE_CONFIG = {
 # ===== СОСТОЯНИЯ =====
 
 class ConversationState(Enum):
-    INITIALIZING = "initializing"       # Инициализация микрофона
-    LISTENING = "listening"             # Активное прослушивание
-    SPEECH_DETECTED = "speech_detected" # Обнаружена речь
-    PROCESSING = "processing"           # Обработка STT+LLM+TTS
-    SPEAKING = "speaking"               # Воспроизведение ответа
-    INTERRUPTED = "interrupted"         # Перебивание
-    ERROR = "error"                     # Ошибка
-    PAUSED = "paused"                   # Пауза
+    INITIALIZING = "initializing"
+    LISTENING = "listening"
+    SPEECH_DETECTED = "speech_detected"
+    PROCESSING = "processing"
+    SPEAKING = "speaking"
+    INTERRUPTED = "interrupted"
+    ERROR = "error"
+    PAUSED = "paused"
 
 @dataclass
 class AudioChunk:
@@ -126,17 +124,21 @@ class SpeechSegment:
     audio_data: bytes
     confidence: float = 0.0
 
-# ===== УЛУЧШЕННЫЙ VAD =====
+# ===== ИСПРАВЛЕННЫЙ VAD =====
 
-class AdvancedVAD:
-    """Продвинутый детектор голосовой активности для hands-free режима"""
+class FixedAdvancedVAD:
+    """ИСПРАВЛЕННЫЙ детектор голосовой активности с правильной логикой"""
     
     def __init__(self, config: dict):
         self.threshold = config["vad_threshold"]
         self.hang_time_ms = config["vad_hang_time_ms"]
         self.attack_time_ms = config["vad_attack_time_ms"]
+        
+        # ИСПРАВЛЕННЫЕ настройки перебивания
         self.interrupt_threshold = config["interrupt_threshold"]
         self.interrupt_confirmation_ms = config["interrupt_confirmation_ms"]
+        self.interrupt_cooldown_ms = config["interrupt_cooldown_ms"]
+        self.interrupt_min_speaking_time_ms = config["interrupt_min_speaking_time_ms"]
         
         # Состояние VAD
         self.is_speech_active = False
@@ -144,25 +146,49 @@ class AdvancedVAD:
         self.last_speech_time = 0.0
         self.potential_speech_start = 0.0
         
-        # Для перебивания
+        # ИСПРАВЛЕННОЕ состояние перебивания
         self.interrupt_candidate_start = 0.0
-        self.is_interrupt_detected = False
+        self.last_interrupt_time = 0.0          # Для cooldown
+        self.speaking_start_time = 0.0          # Когда начал говорить ассистент
+        self.interrupt_detection_enabled = False # Включается только в состоянии SPEAKING
         
-        # Скользящее окно для сглаживания
+        # Скользящие окна для сглаживания
         self.amplitude_window = collections.deque(maxlen=5)
-        self.long_term_noise = collections.deque(maxlen=50)  # Для адаптивного порога
+        self.long_term_noise = collections.deque(maxlen=50)
         
         # Эхо-подавление
         self.echo_suppression_until = 0.0
-        self.echo_factor = config.get("echo_suppression_factor", 0.4)
+        self.echo_factor = config.get("echo_suppression_factor", 0.3)
+        
+        logger.info(f"🔧 VAD инициализирован: threshold={self.threshold}, interrupt_threshold={self.interrupt_threshold}")
         
     def set_echo_suppression(self, duration_ms: float):
         """Устанавливает время подавления эха"""
         self.echo_suppression_until = time.time() + (duration_ms / 1000.0)
-        logger.debug(f"Эхо-подавление на {duration_ms}ms")
+        logger.debug(f"🔇 Эхо-подавление на {duration_ms}ms")
         
-    def process_chunk(self, chunk: AudioChunk) -> Dict[str, Any]:
-        """Анализирует аудио чанк и возвращает VAD решения"""
+    def enable_interrupt_detection(self, speaking_started: bool = True):
+        """ИСПРАВЛЕНО: Включает детекцию перебивания только при говорении ассистента"""
+        if speaking_started:
+            self.interrupt_detection_enabled = True
+            self.speaking_start_time = time.time()
+            self.interrupt_candidate_start = 0.0
+            logger.debug("🔊 Детекция перебивания ВКЛЮЧЕНА")
+        else:
+            self.interrupt_detection_enabled = False
+            self.speaking_start_time = 0.0
+            self.interrupt_candidate_start = 0.0
+            logger.debug("🔇 Детекция перебивания ОТКЛЮЧЕНА")
+    
+    def disable_interrupt_detection(self):
+        """Отключает детекцию перебивания"""
+        self.interrupt_detection_enabled = False
+        self.speaking_start_time = 0.0
+        self.interrupt_candidate_start = 0.0
+        logger.debug("❌ Детекция перебивания отключена")
+        
+    def process_chunk(self, chunk: AudioChunk, current_state: ConversationState) -> Dict[str, Any]:
+        """ИСПРАВЛЕННЫЙ анализ аудио чанка с правильной логикой состояний"""
         
         current_time = chunk.timestamp
         amplitude = chunk.amplitude
@@ -176,8 +202,8 @@ class AdvancedVAD:
         
         # Адаптивный порог на основе фонового шума
         if len(self.long_term_noise) > 10:
-            noise_floor = sum(sorted(self.long_term_noise)[:20]) / 20  # Нижние 40%
-            adaptive_threshold = max(self.threshold, noise_floor * 3)
+            noise_floor = sum(sorted(self.long_term_noise)[:20]) / 20
+            adaptive_threshold = max(self.threshold, noise_floor * 2.5)
         else:
             adaptive_threshold = self.threshold
         
@@ -194,10 +220,11 @@ class AdvancedVAD:
             "effective_amplitude": effective_amplitude,
             "adaptive_threshold": adaptive_threshold,
             "is_speech_active": self.is_speech_active,
-            "is_echo_suppressed": chunk.is_echo_suppressed
+            "is_echo_suppressed": chunk.is_echo_suppressed,
+            "current_state": current_state.value
         }
         
-        # Детекция речи
+        # === ОСНОВНАЯ ДЕТЕКЦИЯ РЕЧИ ===
         has_voice = effective_amplitude > adaptive_threshold
         
         if has_voice:
@@ -205,6 +232,7 @@ class AdvancedVAD:
                 # Потенциальное начало речи
                 if self.potential_speech_start == 0:
                     self.potential_speech_start = current_time
+                    logger.debug(f"🎤 Потенциальное начало речи: {effective_amplitude:.4f} > {adaptive_threshold:.4f}")
                     
                 # Подтверждение речи после attack time
                 elif (current_time - self.potential_speech_start) * 1000 >= self.attack_time_ms:
@@ -212,7 +240,7 @@ class AdvancedVAD:
                     self.speech_start_time = self.potential_speech_start
                     result["speech_started"] = True
                     result["speech_start_time"] = self.speech_start_time
-                    logger.info("🎤 Начало речи подтверждено")
+                    logger.info(f"🎤 Начало речи подтверждено (state: {current_state.value})")
                     
             self.last_speech_time = current_time
             
@@ -232,22 +260,40 @@ class AdvancedVAD:
                     result["speech_duration_ms"] = speech_duration
                     result["should_process"] = speech_duration >= HANDS_FREE_CONFIG["min_speech_duration_ms"]
                     
-                    logger.info(f"🔇 Конец речи. Длительность: {speech_duration:.0f}ms")
+                    logger.info(f"🔇 Конец речи. Длительность: {speech_duration:.0f}ms (state: {current_state.value})")
         
-        # Детекция перебивания (только когда ассистент говорит)
-        if effective_amplitude > self.interrupt_threshold:
-            if not self.is_interrupt_detected and self.interrupt_candidate_start == 0:
-                self.interrupt_candidate_start = current_time
-                
-            elif self.interrupt_candidate_start > 0:
-                interrupt_duration = (current_time - self.interrupt_candidate_start) * 1000
-                if interrupt_duration >= self.interrupt_confirmation_ms:
-                    self.is_interrupt_detected = True
+        # === ИСПРАВЛЕННАЯ ДЕТЕКЦИЯ ПЕРЕБИВАНИЯ ===
+        # ВАЖНО: Перебивание работает ТОЛЬКО в состоянии SPEAKING
+        if (current_state == ConversationState.SPEAKING and 
+            self.interrupt_detection_enabled and
+            effective_amplitude > self.interrupt_threshold):
+            
+            # Проверяем cooldown
+            if (current_time - self.last_interrupt_time) * 1000 < self.interrupt_cooldown_ms:
+                # В cooldown периоде, игнорируем
+                pass
+            
+            # Проверяем минимальное время говорения
+            elif (current_time - self.speaking_start_time) * 1000 < self.interrupt_min_speaking_time_ms:
+                # Ассистент говорит слишком мало времени, игнорируем
+                pass
+            
+            else:
+                # Начинаем отслеживание потенциального перебивания
+                if self.interrupt_candidate_start == 0:
+                    self.interrupt_candidate_start = current_time
+                    logger.debug(f"⚡ Потенциальное перебивание: {effective_amplitude:.4f} > {self.interrupt_threshold:.4f}")
+                    
+                # Проверяем длительность перебивания
+                elif (current_time - self.interrupt_candidate_start) * 1000 >= self.interrupt_confirmation_ms:
                     result["interrupt_detected"] = True
                     result["interrupt_amplitude"] = effective_amplitude
-                    logger.info("⚡ Перебивание обнаружено!")
+                    self.last_interrupt_time = current_time
+                    self.interrupt_candidate_start = 0
+                    logger.info(f"⚡ ПЕРЕБИВАНИЕ ПОДТВЕРЖДЕНО! Амплитуда: {effective_amplitude:.4f}")
+        
         else:
-            # Сброс детекции перебивания при снижении амплитуды
+            # Сброс кандидата на перебивание при снижении амплитуды или неправильном состоянии
             if self.interrupt_candidate_start > 0:
                 self.interrupt_candidate_start = 0
                 
@@ -255,8 +301,10 @@ class AdvancedVAD:
     
     def reset_interrupt_detection(self):
         """Сброс состояния детекции перебивания"""
-        self.is_interrupt_detected = False
         self.interrupt_candidate_start = 0
+        self.last_interrupt_time = 0
+        self.speaking_start_time = 0
+        logger.debug("🔄 Сброс детекции перебивания")
 
 # ===== КОЛЬЦЕВОЙ АУДИО БУФЕР =====
 
@@ -276,33 +324,33 @@ class CircularAudioBuffer:
         
     def mark_speech_start(self, timestamp: float):
         """Отмечает начало речи в буфере"""
-        # Находим ближайший чанк к времени начала речи
         for i, chunk in enumerate(self.buffer):
-            if abs(chunk.timestamp - timestamp) < 0.1:  # 100ms tolerance
+            if abs(chunk.timestamp - timestamp) < 0.15:  # 150ms tolerance
                 self.speech_start_index = len(self.buffer) - len(self.buffer) + i
+                logger.debug(f"📍 Отмечено начало речи в буфере: индекс {i}")
                 break
         
     def extract_speech_segment(self, end_timestamp: float) -> Optional[bytes]:
         """Извлекает сегмент речи из буфера"""
         if self.speech_start_index is None:
+            logger.warning("❌ Начало речи не отмечено в буфере")
             return None
             
         speech_chunks = []
         speech_started = False
         
         for chunk in self.buffer:
-            # Начинаем сбор с отмеченного начала речи
             if not speech_started and chunk.timestamp >= (self.buffer[0].timestamp if self.speech_start_index == 0 else self.buffer[self.speech_start_index].timestamp):
                 speech_started = True
                 
             if speech_started:
                 speech_chunks.append(chunk.data)
                 
-                # Заканчиваем на указанном времени
                 if chunk.timestamp >= end_timestamp:
                     break
         
         if speech_chunks:
+            logger.debug(f"🎯 Извлечен сегмент речи: {len(speech_chunks)} чанков")
             return b''.join(speech_chunks)
         return None
     
@@ -310,10 +358,10 @@ class CircularAudioBuffer:
         """Очищает маркеры речи"""
         self.speech_start_index = None
 
-# ===== HANDS-FREE СЕССИЯ =====
+# ===== ИСПРАВЛЕННАЯ HANDS-FREE СЕССИЯ =====
 
-class HandsFreeSession:
-    """Основная сессия hands-free голосового ассистента"""
+class FixedHandsFreeSession:
+    """ИСПРАВЛЕННАЯ сессия hands-free голосового ассистента"""
     
     def __init__(self, session_id: str, websocket: WebSocket):
         self.session_id = session_id
@@ -321,7 +369,7 @@ class HandsFreeSession:
         self.state = ConversationState.INITIALIZING
         
         # Компоненты
-        self.vad = AdvancedVAD(HANDS_FREE_CONFIG)
+        self.vad = FixedAdvancedVAD(HANDS_FREE_CONFIG)
         self.audio_buffer = CircularAudioBuffer(HANDS_FREE_CONFIG["audio_buffer_size"])
         
         # Обработка
@@ -339,7 +387,7 @@ class HandsFreeSession:
         self.interruptions_count = 0
         self.false_positives = 0
         
-        logger.info(f"🎤 Создана hands-free сессия: {session_id}")
+        logger.info(f"🎤 Создана ИСПРАВЛЕННАЯ hands-free сессия: {session_id}")
     
     async def initialize(self):
         """Инициализация сессии"""
@@ -348,11 +396,12 @@ class HandsFreeSession:
             "message": "Голосовой ассистент готов. Говорите в любое время!",
             "config": {
                 "vad_threshold": HANDS_FREE_CONFIG["vad_threshold"],
+                "interrupt_threshold": HANDS_FREE_CONFIG["interrupt_threshold"],
                 "interrupt_enabled": True,
                 "echo_suppression": True
             }
         })
-        logger.info("✅ Hands-free сессия инициализирована")
+        logger.info("✅ ИСПРАВЛЕННАЯ hands-free сессия инициализирована")
     
     async def process_audio_chunk(self, audio_data: bytes):
         """Непрерывная обработка аудио чанков"""
@@ -375,14 +424,14 @@ class HandsFreeSession:
             # Добавляем в кольцевой буфер
             self.audio_buffer.add_chunk(chunk)
             
-            # VAD анализ
-            vad_result = self.vad.process_chunk(chunk)
+            # VAD анализ с передачей текущего состояния
+            vad_result = self.vad.process_chunk(chunk, self.state)
             
             # Обрабатываем VAD события
             await self._handle_vad_events(vad_result)
             
-            # Отправляем состояние (каждые 10 чанков для экономии)
-            if chunk.chunk_id % 10 == 0:
+            # Отправляем состояние (каждые 20 чанков для экономии)
+            if chunk.chunk_id % 20 == 0:
                 await self._send_audio_status(vad_result)
                 
         except Exception as e:
@@ -390,7 +439,7 @@ class HandsFreeSession:
             await self._send_event("error", {"message": str(e)})
     
     async def _handle_vad_events(self, vad_result: Dict[str, Any]):
-        """Обработка событий VAD"""
+        """ИСПРАВЛЕННАЯ обработка событий VAD"""
         
         # Начало речи
         if vad_result.get("speech_started"):
@@ -403,8 +452,8 @@ class HandsFreeSession:
                 })
             
             elif self.state == ConversationState.SPEAKING:
-                # Потенциальное перебивание
-                logger.info("🎤 Речь обнаружена во время воспроизведения")
+                # Речь во время воспроизведения - это потенциальное перебивание
+                logger.debug("🎤 Речь обнаружена во время воспроизведения")
         
         # Конец речи
         if vad_result.get("speech_ended"):
@@ -424,24 +473,30 @@ class HandsFreeSession:
                     if speech_audio:
                         await self._process_speech_segment(speech_audio, speech_duration)
                     else:
-                        logger.warning("Не удалось извлечь речевой сегмент")
+                        logger.warning("❌ Не удалось извлечь речевой сегмент")
                         await self._update_state(ConversationState.LISTENING)
                 else:
                     # Слишком короткая речь
                     self.false_positives += 1
+                    logger.info(f"❌ Ложное срабатывание VAD: {speech_duration:.0f}ms < {HANDS_FREE_CONFIG['min_speech_duration_ms']}ms")
                     await self._update_state(ConversationState.LISTENING)
                 
                 self.audio_buffer.clear_speech_markers()
         
-        # Перебивание
+        # ИСПРАВЛЕННАЯ обработка перебивания
         if vad_result.get("interrupt_detected"):
             if self.state == ConversationState.SPEAKING:
                 await self._handle_interruption(vad_result)
+            else:
+                logger.warning(f"⚠️ Ложное перебивание в состоянии {self.state.value}")
     
     async def _process_speech_segment(self, audio_data: bytes, duration_ms: float):
         """Обработка речевого сегмента через STT->LLM->TTS"""
         
         await self._update_state(ConversationState.PROCESSING)
+        
+        # Отключаем детекцию перебивания
+        self.vad.disable_interrupt_detection()
         
         # Отменяем предыдущую обработку если есть
         if self.current_processing_task and not self.current_processing_task.done():
@@ -452,7 +507,7 @@ class HandsFreeSession:
         )
     
     async def _full_processing_pipeline(self, audio_data: bytes, duration_ms: float):
-        """Полный pipeline обработки"""
+        """ИСПРАВЛЕННЫЙ полный pipeline обработки"""
         
         try:
             pipeline_start = time.time()
@@ -505,6 +560,11 @@ class HandsFreeSession:
             try:
                 # Конвертируем в WAV
                 wav_data = self._convert_to_wav(audio_data)
+                
+                # Проверяем размер файла
+                if len(wav_data) < 1000:
+                    logger.warning("⚠️ Аудио файл слишком мал для Whisper")
+                    return ""
                 
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
                     temp_file.write(wav_data)
@@ -582,15 +642,15 @@ class HandsFreeSession:
         return response
     
     async def _run_tts_and_play(self, text: str):
-        """TTS и воспроизведение с возможностью перебивания"""
+        """ИСПРАВЛЕННЫЙ TTS и воспроизведение с правильной детекцией перебивания"""
         
         await self._update_state(ConversationState.SPEAKING)
         
+        # ИСПРАВЛЕНО: Включаем детекцию перебивания при начале говорения
+        self.vad.enable_interrupt_detection(speaking_started=True)
+        
         # Устанавливаем эхо-подавление
         self.vad.set_echo_suppression(HANDS_FREE_CONFIG["echo_suppression_duration_ms"])
-        
-        # Сброс детекции перебивания
-        self.vad.reset_interrupt_detection()
         
         def tts_call():
             try:
@@ -627,6 +687,9 @@ class HandsFreeSession:
         if audio_content and self.state == ConversationState.SPEAKING:
             # Потоковое воспроизведение
             await self._stream_audio_with_interruption(audio_content)
+        
+        # Отключаем детекцию перебивания после завершения
+        self.vad.disable_interrupt_detection()
     
     async def _stream_audio_with_interruption(self, audio_content: bytes):
         """Потоковое воспроизведение с проверкой перебивания"""
@@ -642,7 +705,7 @@ class HandsFreeSession:
         for i in range(0, len(audio_content), chunk_size):
             # Проверяем состояние - могли перебить
             if self.state != ConversationState.SPEAKING:
-                logger.info("Воспроизведение прервано")
+                logger.info("🛑 Воспроизведение прервано")
                 break
                 
             chunk = audio_content[i:i + chunk_size]
@@ -664,14 +727,17 @@ class HandsFreeSession:
             await self._send_event("tts_complete", {"interrupted": False})
     
     async def _handle_interruption(self, vad_result: Dict[str, Any]):
-        """Обработка перебивания пользователем"""
+        """ИСПРАВЛЕННАЯ обработка перебивания пользователем"""
         
-        logger.info("⚡ Обрабатываем перебивание")
+        logger.info("⚡ Обрабатываем ПОДТВЕРЖДЕННОЕ перебивание")
         self.interruptions_count += 1
         
         # Останавливаем воспроизведение
         if self.current_playback_task and not self.current_playback_task.done():
             self.current_playback_task.cancel()
+        
+        # Отключаем детекцию перебивания
+        self.vad.disable_interrupt_detection()
         
         await self._update_state(ConversationState.INTERRUPTED)
         
@@ -691,6 +757,7 @@ class HandsFreeSession:
     async def pause_session(self):
         """Приостановка сессии"""
         self.is_active = False
+        self.vad.disable_interrupt_detection()
         await self._update_state(ConversationState.PAUSED)
         await self._send_event("session_paused", {"timestamp": time.time()})
     
@@ -703,6 +770,9 @@ class HandsFreeSession:
     async def close(self):
         """Закрытие сессии"""
         self.is_active = False
+        
+        # Отключаем детекцию перебивания
+        self.vad.disable_interrupt_detection()
         
         # Отменяем активные задачи
         if self.current_processing_task and not self.current_processing_task.done():
@@ -720,7 +790,7 @@ class HandsFreeSession:
             "session_duration": time.time() - self.last_interaction
         })
         
-        logger.info(f"🔚 Hands-free сессия закрыта: {self.session_id}")
+        logger.info(f"🔚 ИСПРАВЛЕННАЯ hands-free сессия закрыта: {self.session_id}")
     
     def _calculate_amplitude(self, audio_data: bytes) -> float:
         """Вычисление амплитуды аудио"""
@@ -769,9 +839,18 @@ class HandsFreeSession:
             return audio_data
     
     async def _update_state(self, new_state: ConversationState):
-        """Обновление состояния"""
+        """ИСПРАВЛЕННОЕ обновление состояния с правильным управлением детекцией перебивания"""
         old_state = self.state
         self.state = new_state
+        
+        # ИСПРАВЛЕНО: Управляем детекцией перебивания в зависимости от состояния
+        if new_state == ConversationState.SPEAKING:
+            # Детекция перебивания будет включена в _run_tts_and_play
+            pass
+        else:
+            # Во всех остальных состояниях отключаем детекцию перебивания
+            if old_state == ConversationState.SPEAKING:
+                self.vad.disable_interrupt_detection()
         
         await self._send_event("state_changed", {
             "old_state": old_state.value,
@@ -805,7 +884,8 @@ class HandsFreeSession:
             "smooth_amplitude": vad_result.get("smooth_amplitude", 0),
             "is_speech_active": vad_result.get("is_speech_active", False),
             "is_echo_suppressed": vad_result.get("is_echo_suppressed", False),
-            "state": self.state.value
+            "state": self.state.value,
+            "interrupt_detection_enabled": self.vad.interrupt_detection_enabled
         })
 
 # ===== SESSION MANAGER =====
@@ -814,16 +894,16 @@ class HandsFreeSessionManager:
     """Менеджер hands-free сессий"""
     
     def __init__(self):
-        self.sessions: Dict[str, HandsFreeSession] = {}
+        self.sessions: Dict[str, FixedHandsFreeSession] = {}
     
-    async def create_session(self, websocket: WebSocket) -> HandsFreeSession:
+    async def create_session(self, websocket: WebSocket) -> FixedHandsFreeSession:
         session_id = str(uuid.uuid4())
-        session = HandsFreeSession(session_id, websocket)
+        session = FixedHandsFreeSession(session_id, websocket)
         self.sessions[session_id] = session
         
         await session.initialize()
         
-        logger.info(f"✅ Создана hands-free сессия: {session_id}")
+        logger.info(f"✅ Создана ИСПРАВЛЕННАЯ hands-free сессия: {session_id}")
         return session
     
     async def close_session(self, session_id: str):
@@ -838,9 +918,9 @@ class HandsFreeSessionManager:
 # ===== FASTAPI APPLICATION =====
 
 app = FastAPI(
-    title="Hands-Free Voice Assistant v6.0",
-    description="Real-time voice assistant с режимом телефонного разговора",
-    version="6.0.0"
+    title="Fixed Hands-Free Voice Assistant v6.1",
+    description="Исправленный голосовой ассистент с правильной логикой перебивания",
+    version="6.1.0"
 )
 
 app.add_middleware(
@@ -861,7 +941,7 @@ async def get_homepage():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hands-Free Voice Assistant v6.0</title>
+    <title>Fixed Hands-Free Voice Assistant v6.1</title>
     <style>
         body {
             font-family: 'Inter', system-ui, sans-serif;
@@ -896,8 +976,18 @@ async def get_homepage():
         
         .subtitle {
             font-size: 1.1rem;
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
             opacity: 0.9;
+        }
+        
+        .version-badge {
+            display: inline-block;
+            padding: 0.3rem 1rem;
+            background: linear-gradient(45deg, #00b894, #00a085);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
         }
         
         .main-button {
@@ -976,22 +1066,6 @@ async def get_homepage():
             border-radius: 30px;
             transition: width 0.1s ease;
             position: relative;
-        }
-        
-        .audio-bar::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
-            animation: shine 2s infinite;
-        }
-        
-        @keyframes shine {
-            0% { left: -100%; }
-            100% { left: 100%; }
         }
         
         .stats {
@@ -1082,14 +1156,50 @@ async def get_homepage():
             background: #10b981;
             box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
         }
+        
+        .fixes-list {
+            text-align: left;
+            background: rgba(0, 184, 148, 0.1);
+            border: 1px solid rgba(0, 184, 148, 0.3);
+            border-radius: 15px;
+            padding: 1rem;
+            margin: 1rem 0;
+            font-size: 0.85rem;
+        }
+        
+        .fixes-list h4 {
+            margin: 0 0 0.5rem 0;
+            color: #00b894;
+        }
+        
+        .fixes-list ul {
+            margin: 0;
+            padding-left: 1.2rem;
+        }
+        
+        .fixes-list li {
+            margin: 0.3rem 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="connection-indicator" id="connectionStatus"></div>
         
-        <h1>🎤 Алиса Hands-Free</h1>
-        <p class="subtitle">Разговор без кнопок • Перебивание • Реальное время</p>
+        <h1>🎤 Алиса Fixed</h1>
+        <p class="subtitle">Исправленный голосовой ассистент</p>
+        <div class="version-badge">v6.1 - ИСПРАВЛЕНО</div>
+        
+        <div class="fixes-list">
+            <h4>✅ Исправления:</h4>
+            <ul>
+                <li>Детекция перебивания только при говорении</li>
+                <li>Убран спам перебиваний</li>
+                <li>Добавлен cooldown защиты</li>
+                <li>Улучшены пороги VAD</li>
+                <li>Правильная логика состояний</li>
+            </ul>
+        </div>
         
         <button class="main-button" id="mainButton">📞</button>
         
@@ -1101,14 +1211,13 @@ async def get_homepage():
         
         <div class="controls">
             <button class="control-btn" id="pauseBtn">⏸️ Пауза</button>
-            <button class="control-btn" id="muteBtn">🔇 Тишина</button>
             <button class="control-btn active" id="autoBtn">🤖 Авто</button>
         </div>
         
         <div class="stats">
             <div class="stat-item">
                 <div class="stat-value" id="exchangeCount">0</div>
-                <div>Обменов</div>
+                <div>Диалогов</div>
             </div>
             <div class="stat-item">
                 <div class="stat-value" id="interruptCount">0</div>
@@ -1124,7 +1233,7 @@ async def get_homepage():
     </div>
 
     <script>
-        class HandsFreeVoiceAssistant {
+        class FixedHandsFreeVoiceAssistant {
             constructor() {
                 this.ws = null;
                 this.mediaRecorder = null;
@@ -1149,13 +1258,11 @@ async def get_homepage():
                 this.interruptCount = document.getElementById('interruptCount');
                 
                 this.pauseBtn = document.getElementById('pauseBtn');
-                this.muteBtn = document.getElementById('muteBtn');
                 this.autoBtn = document.getElementById('autoBtn');
                 
                 // События
                 this.mainButton.addEventListener('click', () => this.toggleSession());
                 this.pauseBtn.addEventListener('click', () => this.togglePause());
-                this.muteBtn.addEventListener('click', () => this.toggleMute());
             }
             
             connectWebSocket() {
@@ -1165,7 +1272,7 @@ async def get_homepage():
                 this.ws = new WebSocket(wsUrl);
                 
                 this.ws.onopen = () => {
-                    console.log('🔗 Подключено к hands-free ассистенту');
+                    console.log('🔗 Подключено к ИСПРАВЛЕННОМУ hands-free ассистенту');
                     this.connectionStatus.classList.add('connected');
                     this.status.textContent = 'Подключено! Нажмите для начала разговора';
                 };
@@ -1330,7 +1437,7 @@ async def get_homepage():
             
             updateAudioVisualizer(data) {
                 const amplitude = data.smooth_amplitude || 0;
-                const percentage = Math.min(amplitude * 1000, 100); // Усиливаем для визуализации
+                const percentage = Math.min(amplitude * 800, 100); // Настроен для новых порогов
                 this.audioBar.style.width = percentage + '%';
             }
             
@@ -1378,7 +1485,7 @@ async def get_homepage():
             togglePause() {
                 this.isPaused = !this.isPaused;
                 this.pauseBtn.classList.toggle('active', this.isPaused);
-                this.pauseBtn.textContent = this.isPaused ? '▶️ Возобновить' : '⏸️ Пауза';
+                this.pauseBtn.textContent = this.isPaused ? '▶️ Продолжить' : '⏸️ Пауза';
                 
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify({
@@ -1386,16 +1493,11 @@ async def get_homepage():
                     }));
                 }
             }
-            
-            toggleMute() {
-                // Реализация отключения звука
-                console.log('Mute toggle - пока не реализовано');
-            }
         }
         
         // Запуск приложения
         document.addEventListener('DOMContentLoaded', () => {
-            window.assistant = new HandsFreeVoiceAssistant();
+            window.assistant = new FixedHandsFreeVoiceAssistant();
         });
     </script>
 </body>
@@ -1406,16 +1508,17 @@ async def get_homepage():
 async def health_check():
     return JSONResponse({
         "status": "healthy",
-        "version": "6.0.0",
-        "description": "Hands-Free Voice Assistant",
+        "version": "6.1.0",
+        "description": "Fixed Hands-Free Voice Assistant",
         "active_sessions": session_manager.get_active_sessions_count(),
-        "features": ["continuous_listening", "interruption_support", "echo_suppression"]
+        "features": ["fixed_interruption_logic", "debounced_vad", "proper_state_management"],
+        "fixes": ["interrupt_only_when_speaking", "cooldown_protection", "improved_thresholds"]
     })
 
 @app.websocket("/ws/hands-free")
 async def websocket_hands_free_endpoint(websocket: WebSocket):
     """
-    Главный WebSocket endpoint для hands-free режима
+    Главный WebSocket endpoint для ИСПРАВЛЕННОГО hands-free режима
     """
     await websocket.accept()
     
@@ -1451,14 +1554,15 @@ async def websocket_hands_free_endpoint(websocket: WebSocket):
         await session_manager.close_session(session.session_id)
 
 def main():
-    logger.info("🚀 Запуск Hands-Free Voice Assistant v6.0")
-    logger.info("📋 Режим 'телефонного разговора':")
-    logger.info("   - Постоянная прослушка микрофона")
-    logger.info("   - Автоматическое определение речи")
-    logger.info("   - Поддержка перебивания")
-    logger.info("   - Эхо-подавление")
+    logger.info("🚀 Запуск ИСПРАВЛЕННОГО Hands-Free Voice Assistant v6.1")
+    logger.info("🔧 ИСПРАВЛЕНИЯ:")
+    logger.info("   - Детекция перебивания только в состоянии SPEAKING")
+    logger.info("   - Добавлен cooldown для предотвращения спама")
+    logger.info("   - Улучшены пороги VAD для стабильности")
+    logger.info("   - Правильная логика управления состояниями")
     logger.info(f"   - VAD порог: {HANDS_FREE_CONFIG['vad_threshold']}")
     logger.info(f"   - Порог перебивания: {HANDS_FREE_CONFIG['interrupt_threshold']}")
+    logger.info(f"   - Cooldown перебивания: {HANDS_FREE_CONFIG['interrupt_cooldown_ms']}ms")
     
     port = int(os.getenv("PORT", 10000))
     uvicorn.run(
