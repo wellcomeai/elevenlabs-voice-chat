@@ -1,74 +1,87 @@
 #!/usr/bin/env python3
 """
-Скрипт для запуска ElevenLabs Conversational AI Assistant
+Скрипт запуска ElevenLabs Voice Chat
 Проверяет конфигурацию и запускает сервер
 """
 
 import os
 import sys
 import logging
-import asyncio
-import uvicorn
 from pathlib import Path
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
 def check_environment():
-    """Проверка переменных окружения и файлов"""
-    print("🔍 Проверка конфигурации ElevenLabs AI Assistant...")
+    """Проверка окружения"""
+    print("🔍 Проверка конфигурации...")
     
     issues = []
     warnings = []
-    
-    # Проверка API ключа
-    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
-    if not elevenlabs_key:
-        issues.append("❌ ELEVENLABS_API_KEY не установлен")
-        print("💡 Получите API ключ на: https://elevenlabs.io/")
-        print("💡 Установите: export ELEVENLABS_API_KEY=your_api_key")
-    else:
-        print("✅ ElevenLabs API ключ найден")
-        
-        # Проверяем длину ключа (примерная валидация)
-        if len(elevenlabs_key) < 20:
-            warnings.append("⚠️  API ключ кажется слишком коротким")
-    
-    # Проверка Agent ID (необязательный)
-    agent_id = os.getenv("ELEVENLABS_AGENT_ID")
-    if agent_id:
-        print(f"✅ Agent ID настроен: {agent_id[:8]}...")
-    else:
-        warnings.append("⚠️  ELEVENLABS_AGENT_ID не установлен (будет использован публичный агент)")
     
     # Проверка Python версии
     if sys.version_info < (3, 8):
         issues.append("❌ Требуется Python 3.8 или выше")
     else:
-        print(f"✅ Python версия: {sys.version.split()[0]}")
+        print(f"✅ Python {sys.version.split()[0]}")
+    
+    # Проверка API ключа
+    api_key = os.getenv("ELEVENLABS_API_KEY")
+    if not api_key or api_key == "your_api_key_here":
+        issues.append("❌ ELEVENLABS_API_KEY не установлен")
+    else:
+        print("✅ ElevenLabs API ключ найден")
+        if len(api_key) < 20:
+            warnings.append("⚠️ API ключ кажется слишком коротким")
+    
+    # Проверка Agent ID
+    agent_id = os.getenv("ELEVENLABS_AGENT_ID")
+    if agent_id:
+        print(f"✅ Agent ID: {agent_id[:12]}...")
+    else:
+        warnings.append("⚠️ ELEVENLABS_AGENT_ID не установлен (будет использован по умолчанию)")
     
     # Проверка файлов
-    required_files = ["app.py", "requirements.txt"]
+    required_files = ["app.py", "requirements.txt", "index.html"]
     for file in required_files:
-        if not Path(file).exists():
-            issues.append(f"❌ Файл {file} не найден")
+        if Path(file).exists():
+            print(f"✅ {file}")
         else:
-            print(f"✅ {file} найден")
-    
-    # Проверка index.html
-    if not Path("index.html").exists():
-        warnings.append("⚠️  index.html не найден (будет использован fallback)")
-    else:
-        print("✅ index.html найден")
+            issues.append(f"❌ Файл {file} не найден")
     
     return issues, warnings
 
+def check_dependencies():
+    """Проверка зависимостей"""
+    print("\n🧪 Проверка зависимостей...")
+    
+    missing = []
+    
+    try:
+        import fastapi
+        print("✅ FastAPI")
+    except ImportError:
+        missing.append("fastapi")
+    
+    try:
+        import uvicorn
+        print("✅ Uvicorn")
+    except ImportError:
+        missing.append("uvicorn")
+    
+    try:
+        import websockets
+        print("✅ WebSockets")
+    except ImportError:
+        missing.append("websockets")
+    
+    try:
+        import aiohttp
+        print("✅ Aiohttp")
+    except ImportError:
+        missing.append("aiohttp")
+    
+    return missing
+
 def print_setup_instructions():
-    """Выводит инструкции по настройке"""
+    """Инструкции по настройке"""
     print("\n" + "="*60)
     print("📋 ИНСТРУКЦИИ ПО НАСТРОЙКЕ")
     print("="*60)
@@ -81,104 +94,33 @@ def print_setup_instructions():
     print("\n2️⃣ Установите переменные окружения:")
     print("   Linux/Mac:")
     print("   export ELEVENLABS_API_KEY=your_api_key_here")
-    print("   export ELEVENLABS_AGENT_ID=your_agent_id  # опционально")
     print("\n   Windows:")
     print("   set ELEVENLABS_API_KEY=your_api_key_here")
-    print("   set ELEVENLABS_AGENT_ID=your_agent_id     # опционально")
     
-    print("\n3️⃣ Создайте .env файл (альтернатива):")
+    print("\n3️⃣ Или создайте .env файл:")
     print("   ELEVENLABS_API_KEY=your_api_key_here")
     print("   ELEVENLABS_AGENT_ID=your_agent_id")
     
-    print("\n4️⃣ Для создания собственного агента:")
-    print("   • Войдите в ElevenLabs dashboard")
-    print("   • Создайте Conversational AI Agent")
-    print("   • Скопируйте Agent ID")
-    
-    print("\n5️⃣ Установите зависимости:")
+    print("\n4️⃣ Установите зависимости:")
     print("   pip install -r requirements.txt")
 
-def test_imports():
-    """Проверка импорта зависимостей"""
-    print("\n🧪 Проверка зависимостей...")
-    
-    try:
-        import fastapi
-        print("✅ FastAPI")
-    except ImportError:
-        print("❌ FastAPI не установлен")
-        return False
-        
-    try:
-        import websockets
-        print("✅ WebSockets")
-    except ImportError:
-        print("❌ WebSockets не установлен")
-        return False
-        
-    try:
-        import uvicorn
-        print("✅ Uvicorn")
-    except ImportError:
-        print("❌ Uvicorn не установлен")
-        return False
-    
-    return True
-
-def create_env_file_template():
-    """Создает шаблон .env файла"""
-    env_template = """# ElevenLabs Conversational AI Configuration
-# Скопируйте этот файл в .env и заполните своими значениями
-
-# ОБЯЗАТЕЛЬНО: Ваш API ключ от ElevenLabs
-ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
-
-# ОПЦИОНАЛЬНО: ID вашего агента (если не указан, будет использован публичный)
-ELEVENLABS_AGENT_ID=your_agent_id_here
-
-# Настройки сервера
+def create_env_template():
+    """Создание шаблона .env"""
+    if not Path(".env.example").exists():
+        env_content = """# ElevenLabs Voice Chat Configuration
+ELEVENLABS_API_KEY=your_api_key_here
+ELEVENLABS_AGENT_ID=agent_01jzwcew2ferttga9m1zcn3js1
 PORT=8000
 LOG_LEVEL=info
 """
-    
-    with open(".env.template", "w", encoding="utf-8") as f:
-        f.write(env_template)
-    
-    print("✅ Создан файл .env.template")
+        with open(".env.example", "w") as f:
+            f.write(env_content)
+        print("✅ Создан .env.example")
 
 def main():
-    """Основная функция запуска"""
-    print("🚀 ElevenLabs Conversational AI Assistant")
+    """Основная функция"""
+    print("🚀 ElevenLabs Voice Chat - Запуск")
     print("=" * 50)
-    
-    # Проверка окружения
-    issues, warnings = check_environment()
-    
-    # Выводим предупреждения
-    if warnings:
-        print("\n⚠️  Предупреждения:")
-        for warning in warnings:
-            print(f"   {warning}")
-    
-    # Если есть критические проблемы
-    if issues:
-        print("\n❌ Критические проблемы:")
-        for issue in issues:
-            print(f"   {issue}")
-        
-        print_setup_instructions()
-        create_env_file_template()
-        
-        response = input("\n❓ Продолжить запуск несмотря на проблемы? (y/N): ")
-        if response.lower() != 'y':
-            print("👋 Исправьте проблемы и запустите снова")
-            return sys.exit(1)
-    
-    # Проверка зависимостей
-    if not test_imports():
-        print("\n❌ Не все зависимости установлены")
-        print("💡 Выполните: pip install -r requirements.txt")
-        return sys.exit(1)
     
     # Загружаем .env если есть
     try:
@@ -187,21 +129,54 @@ def main():
             load_dotenv()
             print("✅ Загружен .env файл")
     except ImportError:
-        pass  # python-dotenv не обязательная зависимость
+        pass
     
-    print("\n📋 Конфигурация запуска:")
-    print(f"   • Порт: {os.getenv('PORT', 8000)}")
-    print(f"   • API ключ: {'✅ Настроен' if os.getenv('ELEVENLABS_API_KEY') else '❌ Не настроен'}")
-    print(f"   • Agent ID: {'✅ Настроен' if os.getenv('ELEVENLABS_AGENT_ID') else '⚠️  Публичный агент'}")
+    # Проверка окружения
+    issues, warnings = check_environment()
     
-    print("\n🔗 После запуска откройте:")
+    # Проверка зависимостей
+    missing_deps = check_dependencies()
+    
+    # Создаем шаблон .env
+    create_env_template()
+    
+    # Выводим предупреждения
+    if warnings:
+        print("\n⚠️ Предупреждения:")
+        for warning in warnings:
+            print(f"   {warning}")
+    
+    # Проверяем критические проблемы
+    if issues or missing_deps:
+        print("\n❌ Критические проблемы:")
+        for issue in issues:
+            print(f"   {issue}")
+        
+        if missing_deps:
+            print(f"   ❌ Не установлены: {', '.join(missing_deps)}")
+            print("   💡 Выполните: pip install -r requirements.txt")
+        
+        print_setup_instructions()
+        
+        response = input("\n❓ Продолжить запуск? (y/N): ")
+        if response.lower() != 'y':
+            print("👋 Исправьте проблемы и запустите снова")
+            return sys.exit(1)
+    
+    # Показываем конфигурацию
+    print("\n📋 Конфигурация:")
     port = os.getenv("PORT", 8000)
+    print(f"   • Порт: {port}")
+    print(f"   • API ключ: {'✅ Настроен' if os.getenv('ELEVENLABS_API_KEY') else '❌ Не настроен'}")
+    print(f"   • Agent ID: {os.getenv('ELEVENLABS_AGENT_ID', 'По умолчанию')}")
+    
+    print(f"\n🔗 После запуска откройте:")
     print(f"   • http://localhost:{port}")
     print(f"   • http://127.0.0.1:{port}")
     
     print("\n🎯 Возможности:")
-    print("   • Реальное время разговор с AI")
-    print("   • Распознавание речи")
+    print("   • Голосовой разговор с AI")
+    print("   • Распознавание речи в реальном времени")
     print("   • Синтез речи")
     print("   • Voice Activity Detection")
     print("   • Обработка перебиваний")
@@ -210,28 +185,18 @@ def main():
     print("🎤 Запуск сервера...")
     
     try:
-        port = int(os.getenv("PORT", 8000))
-        
-        # Импортируем приложение
-        from app import app
-        
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=port,
-            log_level="info",
-            reload=False  # Отключаем reload для продакшена
-        )
+        # Импортируем и запускаем приложение
+        from app import main as run_app
+        run_app()
         
     except KeyboardInterrupt:
-        print("\n👋 Сервер остановлен пользователем")
+        print("\n👋 Сервер остановлен")
     except Exception as e:
         print(f"\n❌ Ошибка запуска: {e}")
         print("\n💡 Возможные решения:")
-        print("   1. Проверьте что порт свободен")
-        print("   2. Установите зависимости: pip install -r requirements.txt")
-        print("   3. Проверьте права доступа")
-        print("   4. Запустите от имени администратора")
+        print("   1. Проверьте API ключ")
+        print("   2. Убедитесь что порт свободен")
+        print("   3. Установите зависимости: pip install -r requirements.txt")
         sys.exit(1)
 
 if __name__ == "__main__":
