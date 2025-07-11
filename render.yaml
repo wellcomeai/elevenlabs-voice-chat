@@ -1,11 +1,11 @@
-# render.yaml - Production deployment configuration for Render.com
-# OpenAI Voice Assistant v4.0.0
+# render.yaml - ElevenLabs Conversational AI Deployment
+# Конфигурация для деплоя на Render.com
 
 services:
   - type: web
-    name: openai-voice-assistant
+    name: elevenlabs-ai-assistant
     env: python
-    plan: starter # Можно изменить на professional для production
+    plan: starter # Можете изменить на professional для production
     
     # Команды сборки и запуска
     buildCommand: pip install -r requirements.txt
@@ -16,8 +16,10 @@ services:
     
     # Переменные окружения
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false  # Установите через Render Dashboard
+      - key: ELEVENLABS_API_KEY
+        sync: false  # ВАЖНО: Установите через Render Dashboard
+      - key: ELEVENLABS_AGENT_ID
+        sync: false  # Опционально: ID вашего агента
       - key: PYTHON_VERSION
         value: "3.11"
       - key: PORT
@@ -36,3 +38,9 @@ services:
     
     # Регион (опционально)
     # region: oregon
+
+# ВАЖНЫЕ НАСТРОЙКИ:
+# 1. Установите ELEVENLABS_API_KEY в Render Dashboard
+# 2. Получите ключ на: https://elevenlabs.io/
+# 3. ELEVENLABS_AGENT_ID - необязательный (для собственного агента)
+# 4. Для публичного агента код будет работать с демо-агентом
