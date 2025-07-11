@@ -1,22 +1,38 @@
-# render.yaml - конфигурация для автоматического деплоя на Render
+# render.yaml - Production deployment configuration for Render.com
+# OpenAI Voice Assistant v4.0.0
+
 services:
   - type: web
-    name: elevenlabs-voice-assistant
+    name: openai-voice-assistant
     env: python
-    plan: free
+    plan: starter # Можно изменить на professional для production
+    
+    # Команды сборки и запуска
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
-    healthCheckPath: /
+    startCommand: python app.py
+    
+    # Health check
+    healthCheckPath: /api/health
+    
+    # Переменные окружения
     envVars:
-      - key: ELEVENLABS_API_KEY
-        sync: false  # Установите через Render Dashboard
       - key: OPENAI_API_KEY
         sync: false  # Установите через Render Dashboard
       - key: PYTHON_VERSION
         value: "3.11"
       - key: PORT
-        value: "8000"
+        value: "10000"
+      - key: LOG_LEVEL
+        value: "info"
+    
+    # Ресурсы
     disk:
       name: tmp
       mountPath: /tmp
       sizeGB: 1
+    
+    # Автоматический деплой
+    autoDeploy: true
+    
+    # Регион (опционально)
+    # region: oregon
