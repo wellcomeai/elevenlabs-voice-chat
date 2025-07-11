@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElevenLabs Voice Chat - ИИ Помощник v4.0</title>
+    <title>ElevenLabs Voice Chat - Голосовое Перебивание v4.0</title>
     <style>
         * {
             margin: 0;
@@ -270,65 +270,31 @@
             50% { transform: scale(1.08); }
         }
 
-        .volume-indicator {
-            width: 100%;
-            height: 6px;
-            background: #e9ecef;
-            border-radius: 3px;
+        .voice-interruption-indicator {
             margin: 1rem 0;
-            overflow: hidden;
-        }
-
-        .volume-bar {
-            height: 100%;
-            background: linear-gradient(45deg, #667eea, #764ba2);
-            border-radius: 3px;
-            transition: width 0.1s ease;
-            width: 0%;
-        }
-
-        .vad-indicator {
-            margin: 0.5rem 0;
-            font-size: 0.8rem;
-            color: #666;
-        }
-
-        .vad-score {
-            display: inline-block;
-            padding: 0.2rem 0.5rem;
-            border-radius: 4px;
-            background: #f0f0f0;
-            margin-left: 0.5rem;
-        }
-
-        .footer {
-            margin-top: 2rem;
-            padding-top: 1rem;
-            border-top: 1px solid #e9ecef;
-            color: #666;
+            padding: 0.75rem;
+            border-radius: 8px;
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            color: #2e7d32;
             font-size: 0.9rem;
+        }
+
+        .voice-interruption-indicator.active {
+            background: #ffebee;
+            border-color: #f44336;
+            color: #c62828;
+            animation: interruption-glow 1s infinite;
+        }
+
+        @keyframes interruption-glow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
         }
 
         .connection-stats {
             margin: 0.5rem 0;
             font-size: 0.8rem;
-            color: #666;
-            text-align: left;
-        }
-
-        .audio-debug {
-            margin: 0.5rem 0;
-            font-size: 0.75rem;
-            color: #888;
-            text-align: left;
-            background: #f8f9fa;
-            padding: 0.5rem;
-            border-radius: 4px;
-        }
-
-        .audio-queue-info {
-            margin: 0.5rem 0;
-            font-size: 0.75rem;
             color: #666;
             text-align: left;
         }
@@ -344,31 +310,12 @@
             border-left: 3px solid #667eea;
         }
 
-        .settings-panel {
-            margin: 1rem 0;
-            padding: 1rem;
-            background: #f0f0f0;
-            border-radius: 8px;
-            text-align: left;
-        }
-
-        .setting-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 0.5rem 0;
-        }
-
-        .setting-row label {
-            font-size: 0.8rem;
+        .footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e9ecef;
             color: #666;
-        }
-
-        .setting-row input, .setting-row select {
-            padding: 0.25rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 0.8rem;
+            font-size: 0.9rem;
         }
 
         @media (max-width: 600px) {
@@ -390,8 +337,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1 class="title">🎤 ИИ Голосовой Помощник v4.0</h1>
-            <p class="subtitle">Powered by ElevenLabs Conversational AI • Система быстрого перебивания</p>
+            <h1 class="title">🎤 ElevenLabs Голосовой Чат v4.0</h1>
+            <p class="subtitle">Голосовое Перебивание • ElevenLabs Conversational AI</p>
         </div>
 
         <div id="status" class="status disconnected">
@@ -406,7 +353,7 @@
                 ⛔ Отключиться
             </button>
             <button id="interruptBtn" class="btn btn-interrupt" disabled>
-                ⚡ Прервать
+                ⚡ Прервать (ручное)
             </button>
             <button id="diagnosticsBtn" class="btn btn-primary" style="background: linear-gradient(45deg, #2d3748, #4a5568);">
                 🔍 Диагностика
@@ -417,98 +364,46 @@
             🎤
         </div>
 
-        <div class="volume-indicator">
-            <div class="volume-bar" id="volumeBar"></div>
-        </div>
-
-        <div class="vad-indicator">
-            VAD Score: <span class="vad-score" id="vadScore">0.00</span>
+        <div class="voice-interruption-indicator" id="voiceInterruptionIndicator">
+            🎤 Голосовое перебивание: Готово • Говорите когда хотите прервать ассистента
         </div>
 
         <div class="connection-stats" id="connectionStats">
-            <div>Ping: <span id="pingTime">-</span>ms</div>
             <div>Статус: <span id="connectionState">Отключен</span></div>
             <div>Устройство: <span id="deviceType">Определение...</span></div>
+            <div>Conversation ID: <span id="conversationId">-</span></div>
         </div>
 
         <div class="interruption-stats" id="interruptionStats">
-            <div><strong>📊 Статистика перебиваний:</strong></div>
-            <div>Всего: <span id="interruptionCount">0</span></div>
-            <div>Время защиты: <span id="protectionTime">200</span>мс</div>
+            <div><strong>📊 Статистика голосового перебивания:</strong></div>
+            <div>Всего перебиваний: <span id="interruptionCount">0</span></div>
             <div>Последнее: <span id="lastInterruption">-</span></div>
-        </div>
-
-        <div class="audio-debug" id="audioDebug">
-            <div>Аудио система: <span id="audioSystem">Инициализация...</span></div>
-            <div>Формат: <span id="audioFormat">PCM 16kHz</span></div>
-            <div>Буфер: <span id="bufferInfo">4096 samples</span></div>
-        </div>
-
-        <div class="audio-queue-info" id="audioQueueInfo">
-            <div>Очередь аудио: <span id="queueLength">0</span> чанков</div>
-            <div>Обработка: <span id="processingStatus">Неактивно</span></div>
-        </div>
-
-        <div class="settings-panel">
-            <h4>⚙️ Настройки качества:</h4>
-            <div class="setting-row">
-                <label>Задержка между чанками:</label>
-                <select id="chunkDelaySetting">
-                    <option value="25">25мс (Быстро)</option>
-                    <option value="50" selected>50мс (Оптимально)</option>
-                    <option value="100">100мс (Плавно)</option>
-                </select>
-            </div>
-            <div class="setting-row">
-                <label>Размер очереди:</label>
-                <select id="queueSizeSetting">
-                    <option value="5">5 чанков</option>
-                    <option value="10" selected>10 чанков</option>
-                    <option value="20">20 чанков</option>
-                </select>
-            </div>
-            <div class="setting-row">
-                <label>Порог активности:</label>
-                <select id="vadThresholdSetting">
-                    <option value="0.005">Очень низкий</option>
-                    <option value="0.01" selected>Нормальный</option>
-                    <option value="0.02">Высокий</option>
-                </select>
-            </div>
-            <div class="setting-row">
-                <label>Защита от дребезга:</label>
-                <select id="protectionTimeSetting">
-                    <option value="100">100мс (Агрессивно)</option>
-                    <option value="150">150мс (iOS оптимально)</option>
-                    <option value="200" selected>200мс (Стандарт)</option>
-                    <option value="300">300мс (Консервативно)</option>
-                </select>
-            </div>
+            <div>Режим: <span id="interruptionMode">ElevenLabs VAD</span></div>
         </div>
 
         <div class="chat-area" id="chatArea">
             <div class="message system">
-                Нажмите "Подключиться" чтобы начать разговор с ИИ помощником
+                Нажмите "Подключиться" чтобы начать разговор с ИИ ассистентом
             </div>
         </div>
 
         <div class="footer">
             <p>🎯 Говорите естественно • 🎧 Используйте наушники для лучшего качества</p>
             <p>Agent ID: <span id="agentId">Загрузка...</span></p>
-            <p>LLM: <span id="llmInfo">Настройки в ElevenLabs Dashboard</span></p>
+            <p>🎤 <strong>Голосовое перебивание активно:</strong> Просто начните говорить когда ассистент отвечает</p>
             <p style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
                 💡 При проблемах с подключением нажмите "Диагностика"
             </p>
             <p style="margin-top: 0.25rem; font-size: 0.75rem; color: #999;">
-                v4.0 • Система быстрого перебивания • Оптимизация для iOS/Android • Защита от дребезга
+                v4.0 • ElevenLabs Conversational AI • Автоматическое голосовое перебивание
             </p>
         </div>
     </div>
 
     <script>
-        class VoiceChat {
+        class ElevenLabsVoiceChat {
             constructor() {
-                console.log('🚀 VoiceChat v4.0 with Fast Interruption System started');
+                console.log('🚀 ElevenLabs Voice Chat v4.0 с голосовым перебиванием запущен');
                 
                 // Основные состояния
                 this.ws = null;
@@ -516,317 +411,49 @@
                 this.isInitialized = false;
                 this.agentId = null;
                 this.conversationId = null;
-                this.initializationTimeout = null;
                 
-                // Аудио система с очередью
+                // Аудио система
                 this.audioStream = null;
-                this.audioContext = null;
-                this.audioProcessor = null;
-                this.audioSource = null;
-                this.mediaRecorder = null;
                 this.isAgentSpeaking = false;
-                this.vadScore = 0;
-                this.voiceActivityThreshold = 0.01;
-                this.lastUserSpeechTime = Date.now();
+                this.isListening = false;
                 
-                // Система очереди аудио
-                this.audioQueue = [];
-                this.currentAudioSource = null;
-                this.isProcessingAudio = false;
-                this.audioChunkTimeout = null;
-                this.audioQueueStats = { processed: 0, dropped: 0 };
-                
-                // Управление соединением
-                this.keepAliveInterval = null;
-                this.lastActivityTime = Date.now();
-                this.connectionRetryCount = 0;
-                this.maxRetries = 3;
-                this.lastPingTime = null;
-                this.pingInterval = null;
-                
-                // Настройки качества
-                this.settings = {
-                    audioChunkDelay: 50,
-                    maxQueueSize: 10,
-                    interruptionDelay: 200,
-                    resumeListeningDelay: 300,
-                    fadeInDuration: 100,
-                    fadeOutDuration: 50
+                // Система голосового перебивания
+                this.interruptionState = {
+                    count: 0,
+                    lastTime: 0,
+                    isEnabled: true,
+                    mode: 'elevenlabs_vad' // ElevenLabs встроенный VAD
                 };
                 
-                // ✅ НОВАЯ СИСТЕМА ПЕРЕБИВАНИЯ
-                this.initializeInterruptionSystem();
+                // Определяем тип устройства
+                this.deviceInfo = this.getDeviceInfo();
                 
                 this.initializeElements();
-                this.setupSettingsHandlers();
                 this.loadAgentConfig();
-                this.startAudioQueueMonitoring();
                 
-                console.log('✅ VoiceChat v4.0 with Fast Interruption System initialized');
+                console.log('✅ ElevenLabs Voice Chat v4.0 с голосовым перебиванием инициализирован');
             }
 
-            // ✅ НОВАЯ СИСТЕМА ПЕРЕБИВАНИЯ
-            initializeInterruptionSystem() {
-                console.log('🔧 Initializing Fast Interruption System');
+            getDeviceInfo() {
+                const userAgent = navigator.userAgent.toLowerCase();
+                let deviceType = 'Desktop';
                 
-                this.interruptionState = {
-                    is_assistant_speaking: false,
-                    is_user_speaking: false,
-                    last_speech_start: 0,
-                    last_speech_stop: 0,
-                    interruption_count: 0,
-                    last_interruption_time: 0,
-                    current_audio_elements: [],
-                    pending_audio_stop: false,
-                    protection_time: 200 // мс защиты от дребезга
+                if (userAgent.includes('iphone') || userAgent.includes('ipad')) {
+                    deviceType = 'iOS';
+                } else if (userAgent.includes('android')) {
+                    deviceType = 'Android';
+                } else if (userAgent.includes('mobile')) {
+                    deviceType = 'Mobile';
+                }
+                
+                return {
+                    type: deviceType,
+                    userAgent: navigator.userAgent
                 };
-                
-                // Определяем тип устройства для оптимизации
-                this.deviceInfo = {
-                    isIOS: /iPhone|iPad|iPod/i.test(navigator.userAgent),
-                    isAndroid: /Android/i.test(navigator.userAgent),
-                    isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-                };
-                
-                // Настройки защиты от дребезга в зависимости от устройства
-                if (this.deviceInfo.isIOS) {
-                    this.interruptionState.protection_time = 150; // iOS быстрее
-                } else if (this.deviceInfo.isAndroid) {
-                    this.interruptionState.protection_time = 180; // Android средне
-                } else {
-                    this.interruptionState.protection_time = 200; // Desktop медленнее
-                }
-                
-                console.log(`🔧 Interruption system initialized for ${this.getDeviceType()}`);
-                console.log(`🛡️ Protection time: ${this.interruptionState.protection_time}ms`);
-            }
-
-            getDeviceType() {
-                if (this.deviceInfo.isIOS) return 'iOS';
-                if (this.deviceInfo.isAndroid) return 'Android';
-                if (this.deviceInfo.isMobile) return 'Mobile';
-                return 'Desktop';
-            }
-
-            // Быстрая обработка перебивания
-            async handleFastInterruption() {
-                const now = Date.now();
-                
-                // Защита от дребезга
-                if (now - this.interruptionState.last_interruption_time < this.interruptionState.protection_time) {
-                    console.log(`⚡ Игнорируем повторное перебивание (защита ${this.interruptionState.protection_time}мс)`);
-                    return;
-                }
-                
-                this.interruptionState.last_interruption_time = now;
-                this.interruptionState.interruption_count++;
-                
-                console.log(`⚡ БЫСТРОЕ перебивание #${this.interruptionState.interruption_count} на ${this.getDeviceType()}`);
-                
-                // Мгновенно останавливаем всё аудио
-                this.stopAllAudioImmediately();
-                
-                // Отправляем команду перебивания в ElevenLabs
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    try {
-                        this.ws.send(JSON.stringify({
-                            type: "interruption",
-                            timestamp: now
-                        }));
-                        
-                        console.log("📤 Команда перебивания отправлена в ElevenLabs");
-                    } catch (error) {
-                        console.error("❌ Ошибка отправки команды перебивания:", error);
-                    }
-                }
-                
-                // Обновляем UI
-                this.updateInterruptionUI();
-                
-                // Обновляем статистику
-                this.updateInterruptionStats();
-                
-                // Быстро возобновляем прослушивание
-                setTimeout(() => {
-                    if (!this.interruptionState.is_assistant_speaking) {
-                        this.resumeListeningAfterInterruption();
-                    }
-                }, this.deviceInfo.isIOS ? 100 : 150);
-            }
-
-            // Мгновенная остановка всего аудио
-            stopAllAudioImmediately() {
-                console.log("🛑 Мгновенная остановка всего аудио");
-                
-                // Очищаем очередь аудио
-                this.clearAudioQueue();
-                
-                // Останавливаем все активные аудио элементы
-                this.interruptionState.current_audio_elements.forEach(audio => {
-                    try {
-                        if (audio.pause) {
-                            audio.pause();
-                            audio.currentTime = 0;
-                        }
-                        if (audio.src && audio.src.startsWith('blob:')) {
-                            URL.revokeObjectURL(audio.src);
-                        }
-                    } catch (e) {
-                        console.warn("Ошибка остановки аудио:", e);
-                    }
-                });
-                
-                this.interruptionState.current_audio_elements = [];
-                this.interruptionState.is_assistant_speaking = false;
-                this.isAgentSpeaking = false;
-                this.isProcessingAudio = false;
-            }
-
-            // Обновление UI при перебивании
-            updateInterruptionUI() {
-                this.updateStatus('interrupted', `⚠️ Перебивание #${this.interruptionState.interruption_count}`);
-                
-                this.micAnimation.classList.remove('speaking', 'listening');
-                this.micAnimation.classList.add('interrupted');
-                
-                this.addMessage('system', `⚡ Перебивание #${this.interruptionState.interruption_count} (${this.getDeviceType()})`);
-            }
-
-            // Возобновление прослушивания после перебивания
-            resumeListeningAfterInterruption() {
-                console.log("🎤 Возобновление прослушивания после перебивания");
-                
-                this.interruptionState.is_user_speaking = true;
-                
-                // Убираем визуальные эффекты перебивания
-                this.micAnimation.classList.remove('interrupted');
-                this.micAnimation.classList.add('listening');
-                
-                // Возобновляем запись если соединение активно
-                if (this.isConnected && !this.isReconnecting) {
-                    setTimeout(() => {
-                        if (!this.isListening && !this.isProcessingAudio) {
-                            this.startListening();
-                        }
-                    }, 50);
-                }
-                
-                this.updateStatus('listening', '🟢 Слушаю после перебивания...');
-            }
-
-            // Обработка событий от ElevenLabs
-            handleElevenLabsInterruption(data) {
-                console.log("📥 Получено событие перебивания от ElevenLabs:", data);
-                
-                this.interruptionState.interruption_count = data.interruption_count || 
-                    (this.interruptionState.interruption_count + 1);
-                
-                this.stopAllAudioImmediately();
-                this.updateInterruptionUI();
-                this.updateInterruptionStats();
-                
-                // Автоматически возобновляем прослушивание
-                setTimeout(() => {
-                    this.resumeListeningAfterInterruption();
-                }, this.deviceInfo.isIOS ? 200 : 300);
-            }
-
-            // Определение начала речи пользователя (для превентивного перебивания)
-            detectUserSpeechStart(vadScore) {
-                const threshold = this.deviceInfo.isIOS ? 0.35 : 
-                                 this.deviceInfo.isAndroid ? 0.25 : 0.2;
-                
-                if (vadScore > threshold && !this.interruptionState.is_user_speaking) {
-                    this.interruptionState.is_user_speaking = true;
-                    this.interruptionState.last_speech_start = Date.now();
-                    
-                    // Если ассистент говорит - это перебивание
-                    if (this.interruptionState.is_assistant_speaking) {
-                        console.log("🗣️ Пользователь начал говорить - превентивное перебивание!");
-                        this.handleFastInterruption();
-                    }
-                } else if (vadScore <= threshold * 0.3 && this.interruptionState.is_user_speaking) {
-                    this.interruptionState.is_user_speaking = false;
-                    this.interruptionState.last_speech_stop = Date.now();
-                }
-            }
-
-            // Отслеживание состояния ассистента
-            setAssistantSpeaking(speaking, audioElement = null) {
-                this.interruptionState.is_assistant_speaking = speaking;
-                this.isAgentSpeaking = speaking;
-                
-                if (speaking && audioElement) {
-                    this.interruptionState.current_audio_elements.push(audioElement);
-                    console.log(`🗣️ Ассистент начал говорить (элементов: ${this.interruptionState.current_audio_elements.length})`);
-                } else if (!speaking) {
-                    console.log("🔇 Ассистент закончил говорить");
-                    
-                    // Автоматически возобновляем прослушивание
-                    setTimeout(() => {
-                        if (this.isConnected && !this.isReconnecting && !this.isListening) {
-                            this.startListening();
-                        }
-                    }, this.deviceInfo.isIOS ? 300 : 400);
-                }
-                
-                // Обновляем кнопку прерывания
-                this.updateInterruptButtonState();
-            }
-
-            // Обновление статистики перебиваний
-            updateInterruptionStats() {
-                const interruptionCount = document.getElementById('interruptionCount');
-                const protectionTime = document.getElementById('protectionTime');
-                const lastInterruption = document.getElementById('lastInterruption');
-                
-                if (interruptionCount) {
-                    interruptionCount.textContent = this.interruptionState.interruption_count;
-                }
-                
-                if (protectionTime) {
-                    protectionTime.textContent = this.interruptionState.protection_time;
-                }
-                
-                if (lastInterruption && this.interruptionState.last_interruption_time > 0) {
-                    const lastTime = new Date(this.interruptionState.last_interruption_time);
-                    lastInterruption.textContent = lastTime.toLocaleTimeString();
-                }
-            }
-
-            // Добавление кнопки ручного перебивания
-            addManualInterruptionButton() {
-                const interruptBtn = document.getElementById('interruptBtn');
-                if (interruptBtn && !interruptBtn.hasEventListener) {
-                    interruptBtn.addEventListener('click', () => {
-                        if (this.interruptionState.is_assistant_speaking) {
-                            this.handleFastInterruption();
-                        }
-                    });
-                    interruptBtn.hasEventListener = true;
-                    this.interruptBtn = interruptBtn;
-                }
-            }
-
-            // Обновление состояния кнопки прерывания
-            updateInterruptButtonState() {
-                if (this.interruptBtn) {
-                    this.interruptBtn.disabled = !this.interruptionState.is_assistant_speaking || !this.isConnected;
-                    
-                    if (this.interruptionState.is_assistant_speaking && this.isConnected) {
-                        this.interruptBtn.style.opacity = '1';
-                        this.interruptBtn.style.cursor = 'pointer';
-                        this.interruptBtn.textContent = '⚡ Прервать';
-                    } else {
-                        this.interruptBtn.style.opacity = '0.6';
-                        this.interruptBtn.style.cursor = 'not-allowed';
-                        this.interruptBtn.textContent = '⚡ Прервать';
-                    }
-                }
             }
 
             initializeElements() {
-                console.log('🔧 Initializing UI elements');
+                console.log('🔧 Инициализация UI элементов');
                 
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
@@ -835,23 +462,21 @@
                 this.status = document.getElementById('status');
                 this.chatArea = document.getElementById('chatArea');
                 this.micAnimation = document.getElementById('micAnimation');
-                this.volumeBar = document.getElementById('volumeBar');
                 this.agentIdSpan = document.getElementById('agentId');
-                this.vadScoreSpan = document.getElementById('vadScore');
-                this.pingTimeSpan = document.getElementById('pingTime');
                 this.connectionStateSpan = document.getElementById('connectionState');
-                this.audioSystemSpan = document.getElementById('audioSystem');
-                this.audioFormatSpan = document.getElementById('audioFormat');
-                this.bufferInfoSpan = document.getElementById('bufferInfo');
-                this.queueLengthSpan = document.getElementById('queueLength');
-                this.processingStatusSpan = document.getElementById('processingStatus');
+                this.conversationIdSpan = document.getElementById('conversationId');
                 this.deviceTypeSpan = document.getElementById('deviceType');
+                this.voiceInterruptionIndicator = document.getElementById('voiceInterruptionIndicator');
+                this.interruptionCountSpan = document.getElementById('interruptionCount');
+                this.lastInterruptionSpan = document.getElementById('lastInterruption');
+                this.interruptionModeSpan = document.getElementById('interruptionMode');
 
                 // Отображаем тип устройства
                 if (this.deviceTypeSpan) {
-                    this.deviceTypeSpan.textContent = this.getDeviceType();
+                    this.deviceTypeSpan.textContent = this.deviceInfo.type;
                 }
 
+                // Обработчики событий
                 if (this.connectBtn) {
                     this.connectBtn.addEventListener('click', () => {
                         console.log('🖱️ Connect button clicked');
@@ -873,62 +498,19 @@
                     });
                 }
 
-                // Добавляем обработчик для кнопки перебивания
-                this.addManualInterruptionButton();
-
-                console.log('✅ UI elements initialized');
-            }
-
-            setupSettingsHandlers() {
-                const chunkDelaySelect = document.getElementById('chunkDelaySetting');
-                const queueSizeSelect = document.getElementById('queueSizeSetting');
-                const vadThresholdSelect = document.getElementById('vadThresholdSetting');
-                const protectionTimeSelect = document.getElementById('protectionTimeSetting');
-
-                if (chunkDelaySelect) {
-                    chunkDelaySelect.addEventListener('change', (e) => {
-                        this.settings.audioChunkDelay = parseInt(e.target.value);
-                        console.log(`⚙️ Chunk delay updated: ${this.settings.audioChunkDelay}ms`);
+                // Обработчик ручного перебивания
+                if (this.interruptBtn) {
+                    this.interruptBtn.addEventListener('click', () => {
+                        console.log('🖱️ Manual interrupt button clicked');
+                        this.manualInterrupt();
                     });
                 }
 
-                if (queueSizeSelect) {
-                    queueSizeSelect.addEventListener('change', (e) => {
-                        this.settings.maxQueueSize = parseInt(e.target.value);
-                        console.log(`⚙️ Queue size updated: ${this.settings.maxQueueSize}`);
-                    });
-                }
-
-                if (vadThresholdSelect) {
-                    vadThresholdSelect.addEventListener('change', (e) => {
-                        this.voiceActivityThreshold = parseFloat(e.target.value);
-                        console.log(`⚙️ VAD threshold updated: ${this.voiceActivityThreshold}`);
-                    });
-                }
-
-                // ✅ НОВАЯ настройка защиты от дребезга
-                if (protectionTimeSelect) {
-                    protectionTimeSelect.addEventListener('change', (e) => {
-                        this.interruptionState.protection_time = parseInt(e.target.value);
-                        console.log(`⚙️ Protection time updated: ${this.interruptionState.protection_time}ms`);
-                        this.updateInterruptionStats();
-                    });
-                }
-            }
-
-            startAudioQueueMonitoring() {
-                setInterval(() => {
-                    if (this.queueLengthSpan) {
-                        this.queueLengthSpan.textContent = this.audioQueue.length;
-                    }
-                    if (this.processingStatusSpan) {
-                        this.processingStatusSpan.textContent = this.isProcessingAudio ? 'Активно' : 'Неактивно';
-                    }
-                }, 100);
+                console.log('✅ UI элементы инициализированы');
             }
 
             async runDiagnostics() {
-                this.addMessage('system', '🔍 Запуск полной диагностики...');
+                this.addMessage('system', '🔍 Запуск диагностики голосового перебивания...');
                 this.diagnosticsBtn.disabled = true;
                 this.diagnosticsBtn.innerHTML = '⏳ Тестирование...';
                 
@@ -955,11 +537,16 @@
                         this.addMessage('system', `${overallIcon} Общий статус: ${data.overall.status} (${data.overall.health_score})`);
                     }
                     
-                    // Показываем статистику аудио и перебиваний
-                    const audioStats = this.getAudioQueueStats();
-                    this.addMessage('system', `🎵 Аудио: Очередь: ${audioStats.queueLength}, Обработано: ${audioStats.processed}`);
-                    this.addMessage('system', `⚡ Перебивания: ${this.interruptionState.interruption_count}, Защита: ${this.interruptionState.protection_time}мс`);
-                    this.addMessage('system', `📱 Устройство: ${this.getDeviceType()}`);
+                    // Показываем информацию о голосовом перебивании
+                    if (data.voice_interruption_system) {
+                        this.addMessage('system', `🎤 Голосовое перебивание: ${data.voice_interruption_system.status}`);
+                        this.addMessage('system', `📱 Устройство: ${this.deviceInfo.type}`);
+                        
+                        const deviceOpt = data.voice_interruption_system.device_optimizations[this.deviceInfo.type.toLowerCase()];
+                        if (deviceOpt) {
+                            this.addMessage('system', `⚙️ Порог перебивания: ${deviceOpt.threshold}, Режим: ${deviceOpt.expected_behavior}`);
+                        }
+                    }
                     
                     if (data.recommendations && data.recommendations.length > 0) {
                         this.addMessage('system', '💡 Рекомендации:');
@@ -993,8 +580,8 @@
                             this.agentIdSpan.textContent = this.agentId.substring(0, 12) + '...';
                         }
                         this.addMessage('system', `✅ Агент готов (ID: ${this.agentId.substring(0, 8)}...)`);
-                        this.addMessage('system', '🧠 LLM: Настроена в ElevenLabs Dashboard (GPT/Claude/Gemini)');
-                        this.addMessage('system', `⚡ Система быстрого перебивания активна для ${this.getDeviceType()}`);
+                        this.addMessage('system', '🎤 Голосовое перебивание активировано');
+                        this.addMessage('system', `📱 Оптимизировано для ${this.deviceInfo.type}`);
                         
                         if (this.connectBtn) {
                             this.connectBtn.disabled = false;
@@ -1078,10 +665,10 @@
                         this.addMessage('system', `Ошибка URL: ${error.message}`);
                     }
 
-                    console.log('🔗 Connecting to WebSocket:', wsUrl);
+                    console.log('🔗 Connecting to ElevenLabs WebSocket:', wsUrl);
                     this.addMessage('system', `🔗 Подключение к голосовому агенту (${connectionMethod})...`);
                     
-                    // Создаем WebSocket
+                    // Создаем WebSocket подключение к ElevenLabs
                     this.ws = new WebSocket(wsUrl);
                     
                     const connectionTimeout = setTimeout(() => {
@@ -1094,7 +681,6 @@
 
                     this.ws.onopen = () => {
                         clearTimeout(connectionTimeout);
-                        this.connectionRetryCount = 0;
                         this.onWebSocketOpen();
                     };
                     
@@ -1135,136 +721,91 @@
             }
 
             onWebSocketOpen() {
-                console.log('WebSocket connected');
+                console.log('✅ ElevenLabs WebSocket connected');
                 this.isConnected = true;
-                this.isInitialized = false;
                 this.updateStatus('connecting', '🟡 Инициализация...');
-                this.connectionStateSpan.textContent = 'Инициализация...';
-                this.addMessage('system', '🔗 WebSocket подключен, инициализация...');
+                this.connectionStateSpan.textContent = 'Подключен';
+                this.addMessage('system', '🔗 WebSocket подключен к ElevenLabs');
                 
-                // Минимальная инициализация
-                const initMessage = {
-                    type: "conversation_initiation_client_data"
-                };
+                // Отправляем начальное сообщение для инициализации
+                this.sendInitializationMessage();
                 
-                console.log('📤 Sending initialization message:', initMessage);
-                this.ws.send(JSON.stringify(initMessage));
-                
-                this.initializationTimeout = setTimeout(() => {
-                    if (!this.isInitialized) {
-                        console.error('Initialization timeout');
-                        this.addMessage('system', '❌ Таймаут инициализации');
-                        this.disconnect();
-                    }
-                }, 10000);
-                
-                this.startKeepAlive();
-                this.startPingMonitoring();
-
-                // ✅ Сбрасываем счетчики перебивания для новой сессии
-                this.interruptionState.interruption_count = 0;
-                this.interruptionState.last_interruption_time = 0;
+                // Сбрасываем счетчики перебивания для новой сессии
+                this.interruptionState.count = 0;
+                this.interruptionState.lastTime = 0;
                 this.updateInterruptionStats();
                 
-                // Активируем кнопку прерывания
-                this.addManualInterruptionButton();
-                this.updateInterruptButtonState();
+                // Активируем кнопки
+                this.connectBtn.disabled = true;
+                this.disconnectBtn.disabled = false;
+                this.interruptBtn.disabled = false;
                 
-                console.log(`✅ Система перебивания готова для ${this.getDeviceType()}`);
+                // Обновляем индикатор голосового перебивания
+                this.voiceInterruptionIndicator.textContent = '🎤 Голосовое перебивание активно • Говорите когда хотите прервать ассистента';
+                this.voiceInterruptionIndicator.classList.remove('active');
+                
+                console.log(`✅ Голосовое перебивание готово для ${this.deviceInfo.type}`);
             }
 
-            startKeepAlive() {
-                this.keepAliveInterval = setInterval(() => {
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        const keepAliveMessage = {
-                            type: "keep_alive"
-                        };
-                        this.ws.send(JSON.stringify(keepAliveMessage));
-                        console.log('💓 Keep-alive sent');
-                    }
-                }, 15000);
-            }
-
-            stopKeepAlive() {
-                if (this.keepAliveInterval) {
-                    clearInterval(this.keepAliveInterval);
-                    this.keepAliveInterval = null;
-                }
-            }
-
-            startPingMonitoring() {
-                this.pingInterval = setInterval(() => {
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.lastPingTime = Date.now();
-                        const pingMessage = {
-                            type: "ping",
-                            event_id: `ping_${Date.now()}`
-                        };
-                        this.ws.send(JSON.stringify(pingMessage));
-                    }
-                }, 30000);
-            }
-
-            stopPingMonitoring() {
-                if (this.pingInterval) {
-                    clearInterval(this.pingInterval);
-                    this.pingInterval = null;
-                }
-                if (this.pingTimeSpan) {
-                    this.pingTimeSpan.textContent = '-';
+            sendInitializationMessage() {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    // ElevenLabs ожидает простое сообщение для начала разговора
+                    const initMessage = {
+                        type: "conversation_initiation_client_data"
+                    };
+                    
+                    console.log('📤 Sending initialization message to ElevenLabs:', initMessage);
+                    this.ws.send(JSON.stringify(initMessage));
                 }
             }
 
             onWebSocketMessage(event) {
                 try {
-                    this.lastActivityTime = Date.now();
-                    
                     const data = JSON.parse(event.data);
-                    console.log('Received:', data);
+                    console.log('📥 Received from ElevenLabs:', data);
 
-                    switch (data.type) {
+                    const messageType = data.type;
+
+                    switch (messageType) {
                         case 'conversation_initiation_metadata':
-                            this.handleInitiation(data);
+                            this.handleConversationInitiation(data);
                             break;
+                            
                         case 'user_transcript':
                             this.handleUserTranscript(data);
                             break;
+                            
                         case 'agent_response':
                             this.handleAgentResponse(data);
                             break;
+                            
                         case 'agent_response_correction':
                             this.handleAgentResponseCorrection(data);
                             break;
+                            
                         case 'audio':
                             this.handleAudioResponse(data);
                             break;
+                            
                         case 'interruption':
-                            // ✅ НОВАЯ обработка перебиваний
-                            this.handleElevenLabsInterruption(data);
+                            // 🎤 КЛЮЧЕВАЯ ФУНКЦИЯ: Голосовое перебивание от ElevenLabs
+                            this.handleVoiceInterruption(data);
                             break;
+                            
                         case 'ping':
                             this.handlePing(data);
                             break;
+                            
                         case 'pong':
                             this.handlePong(data);
                             break;
-                        case 'vad_score':
-                            this.handleVadScore(data);
-                            break;
-                        case 'internal_tentative_agent_response':
-                            this.handleTentativeResponse(data);
-                            break;
-                        case 'client_tool_call':
-                            this.handleClientToolCall(data);
-                            break;
+                            
                         case 'error':
                             this.handleServerError(data);
                             break;
-                        case 'keep_alive_response':
-                            console.log('💓 Keep-alive acknowledged');
-                            break;
+                            
                         default:
-                            console.log('Unknown message type:', data.type, data);
+                            console.log('Unknown message type:', messageType, data);
                     }
                 } catch (error) {
                     console.error('Error parsing WebSocket message:', error);
@@ -1272,143 +813,119 @@
                 }
             }
 
-            handleInitiation(data) {
+            handleConversationInitiation(data) {
                 const metadata = data.conversation_initiation_metadata_event;
-                console.log('✅ Conversation initiated:', metadata);
-                
-                if (this.initializationTimeout) {
-                    clearTimeout(this.initializationTimeout);
-                    this.initializationTimeout = null;
-                }
+                console.log('✅ ElevenLabs conversation initiated:', metadata);
                 
                 this.isInitialized = true;
                 this.conversationId = metadata.conversation_id;
-                this.updateStatus('listening', '🟢 Слушаю...');
-                this.connectionStateSpan.textContent = 'Подключен';
                 
-                if (this.audioFormatSpan) {
-                    this.audioFormatSpan.textContent = `${metadata.agent_output_audio_format} / ${metadata.user_input_audio_format}`;
+                if (this.conversationIdSpan) {
+                    this.conversationIdSpan.textContent = metadata.conversation_id.substring(0, 8) + '...';
                 }
                 
+                this.updateStatus('listening', '🟢 Готов к разговору');
+                this.connectionStateSpan.textContent = 'Активен';
+                
                 this.addMessage('system', `✅ Разговор начат (ID: ${metadata.conversation_id.substring(0, 8)}...)`);
-                this.addMessage('system', '🎤 Начинайте говорить...');
-                this.addMessage('system', '⚡ Активирована система быстрого перебивания v4.0');
+                this.addMessage('system', '🎤 Говорите... Микрофон слушает постоянно');
+                this.addMessage('system', '⚡ Голосовое перебивание готово!');
                 
-                this.connectBtn.disabled = true;
-                this.disconnectBtn.disabled = false;
-                
-                this.startRecording();
+                // Начинаем запись аудио
+                this.startContinuousAudioCapture();
             }
 
             handleUserTranscript(data) {
                 const transcript = data.user_transcription_event.user_transcript;
                 if (transcript.trim()) {
+                    console.log('👤 User transcript:', transcript);
                     this.addMessage('user', transcript);
                 }
             }
 
             handleAgentResponse(data) {
                 const response = data.agent_response_event.agent_response;
+                console.log('🤖 Agent response:', response);
                 this.addMessage('assistant', response);
                 
-                // ✅ НОВАЯ обработка начала речи ассистента
-                if (!this.interruptionState.is_assistant_speaking) {
-                    this.setAssistantSpeaking(true);
-                    this.updateStatus('speaking', '🎯 ИИ говорит...');
-                    this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
-                    this.micAnimation.classList.add('speaking');
-                    
-                    console.log('🗣️ Agent started speaking, pausing user recording');
-                }
+                // Ассистент начал отвечать
+                this.setAgentSpeaking(true);
             }
 
             handleAgentResponseCorrection(data) {
                 const correction = data.agent_response_correction_event;
-                console.log('Agent response correction:', correction);
+                console.log('📝 Agent response correction:', correction);
                 
+                // Обновляем последнее сообщение ассистента
                 const messages = this.chatArea.querySelectorAll('.message.assistant');
                 if (messages.length > 0) {
                     const lastMessage = messages[messages.length - 1];
                     lastMessage.textContent = correction.corrected_agent_response;
-                    console.log('📝 Agent response corrected');
                 }
             }
 
             handleAudioResponse(data) {
                 try {
                     const audioBase64 = data.audio_event.audio_base_64;
+                    console.log('🔊 Received audio from ElevenLabs agent');
                     
-                    console.log('🔊 Received audio chunk from agent, adding to queue');
+                    // Ассистент говорит
+                    this.setAgentSpeaking(true);
                     
-                    // ✅ НОВАЯ обработка начала аудио
-                    if (!this.interruptionState.is_assistant_speaking) {
-                        this.setAssistantSpeaking(true);
-                        this.updateStatus('speaking', '🎯 ИИ говорит...');
-                        this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
-                        this.micAnimation.classList.add('speaking');
-                    }
-                    
-                    this.addToAudioQueue(audioBase64);
+                    // Воспроизводим аудио
+                    this.playAudio(audioBase64);
                     
                 } catch (error) {
                     console.error('Error handling audio response:', error);
-                    this.handleAudioError();
                 }
             }
 
-            handleVadScore(data) {
-                this.vadScore = data.vad_score_event.vad_score;
-                this.vadScoreSpan.textContent = this.vadScore.toFixed(2);
+            // 🎤 КЛЮЧЕВАЯ ФУНКЦИЯ: Обработка голосового перебивания
+            handleVoiceInterruption(data) {
+                console.log('⚡ ГОЛОСОВОЕ ПЕРЕБИВАНИЕ от ElevenLabs:', data);
                 
-                // ✅ НОВАЯ обработка VAD для превентивного перебивания
-                this.detectUserSpeechStart(this.vadScore);
+                this.interruptionState.count++;
+                this.interruptionState.lastTime = Date.now();
                 
-                const percentage = this.vadScore * 100;
-                this.volumeBar.style.width = percentage + '%';
+                // Останавливаем воспроизведение ассистента
+                this.setAgentSpeaking(false);
                 
-                if (this.vadScore > 0.8) {
-                    this.volumeBar.style.background = 'linear-gradient(45deg, #00ff00, #32cd32)';
-                    if (!this.isAgentSpeaking && !this.isProcessingAudio) {
-                        this.micAnimation.classList.add('recording');
-                        this.micAnimation.classList.remove('listening');
-                    }
-                } else if (this.vadScore > 0.5) {
-                    this.volumeBar.style.background = 'linear-gradient(45deg, #2ed573, #1e90ff)';
-                } else if (this.vadScore > 0.2) {
-                    this.volumeBar.style.background = 'linear-gradient(45deg, #ffa502, #ff6348)';
-                    if (!this.isAgentSpeaking && !this.isProcessingAudio) {
-                        this.micAnimation.classList.remove('recording');
-                        this.micAnimation.classList.add('listening');
-                    }
-                } else {
-                    this.volumeBar.style.background = 'linear-gradient(45deg, #667eea, #764ba2)';
-                    if (!this.isAgentSpeaking && !this.isProcessingAudio) {
-                        this.micAnimation.classList.remove('recording');
-                        this.micAnimation.classList.add('listening');
-                    }
-                }
+                // Обновляем UI
+                this.updateStatus('interrupted', `⚠️ Голосовое перебивание #${this.interruptionState.count}`);
+                this.micAnimation.classList.remove('speaking', 'listening');
+                this.micAnimation.classList.add('interrupted');
                 
-                if (!this.isAgentSpeaking && !this.isProcessingAudio && this.isConnected && this.isInitialized) {
-                    if (this.vadScore > 0.8) {
-                        this.updateStatus('recording', '🎤 Запись речи...');
-                    } else if (this.vadScore > 0.3) {
-                        this.updateStatus('listening', '🟢 Слушаю (возможна речь)...');
-                    } else {
-                        this.updateStatus('listening', '🟢 Слушаю...');
+                // Показываем активное перебивание
+                this.voiceInterruptionIndicator.textContent = `⚡ ПЕРЕБИВАНИЕ АКТИВНО #${this.interruptionState.count} • Продолжайте говорить`;
+                this.voiceInterruptionIndicator.classList.add('active');
+                
+                this.addMessage('system', `⚡ Голосовое перебивание #${this.interruptionState.count} • ElevenLabs VAD`);
+                
+                // Обновляем статистику
+                this.updateInterruptionStats();
+                
+                // Возвращаемся к прослушиванию через короткое время
+                setTimeout(() => {
+                    if (!this.isAgentSpeaking) {
+                        this.resumeListening();
                     }
+                }, 500);
+            }
+
+            handlePing(data) {
+                // Отвечаем на ping от ElevenLabs
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ type: "pong" }));
+                    console.log('🏓 Pong sent to ElevenLabs');
                 }
             }
 
-            handleTentativeResponse(data) {
-                console.log('Agent thinking:', data.tentative_agent_response_internal_event.tentative_agent_response);
-            }
-
-            handleClientToolCall(data) {
-                console.log('Client tool call:', data);
+            handlePong(data) {
+                console.log('🏓 Pong received from ElevenLabs');
             }
 
             handleServerError(data) {
-                console.error('Server error:', data);
+                console.error('❌ ElevenLabs server error:', data);
                 const errorMsg = data.error || data.message || 'Unknown server error';
                 this.addMessage('system', `❌ Ошибка сервера: ${errorMsg}`);
                 
@@ -1418,341 +935,159 @@
                 }
             }
 
-            handlePing(data) {
-                const pongMessage = {
-                    type: "pong",
-                    event_id: data.ping_event.event_id
-                };
+            setAgentSpeaking(speaking) {
+                this.isAgentSpeaking = speaking;
                 
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify(pongMessage));
+                if (speaking) {
+                    console.log('🗣️ Agent started speaking');
+                    this.updateStatus('speaking', '🎯 ИИ говорит...');
+                    this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
+                    this.micAnimation.classList.add('speaking');
                     
-                    if (this.lastPingTime) {
-                        const pingTime = Date.now() - this.lastPingTime;
-                        this.pingTimeSpan.textContent = pingTime;
-                    }
-                }
-                
-                console.log('🏓 Ping received, pong sent');
-            }
-
-            handlePong(data) {
-                if (this.lastPingTime) {
-                    const pingTime = Date.now() - this.lastPingTime;
-                    this.pingTimeSpan.textContent = pingTime;
-                    console.log(`🏓 Pong received, RTT: ${pingTime}ms`);
-                }
-            }
-
-            onWebSocketClose(event) {
-                const code = event?.code || 'unknown';
-                const reason = event?.reason || 'unknown';
-                
-                console.log('WebSocket disconnected. Code:', code, 'Reason:', reason);
-                this.isConnected = false;
-                this.isAgentSpeaking = false;
-                this.connectBtn.disabled = false;
-                this.disconnectBtn.disabled = true;
-                this.connectionStateSpan.textContent = 'Отключен';
-                this.micAnimation.classList.remove('recording', 'listening', 'interrupted', 'speaking');
-
-                // ✅ Сбрасываем состояние перебиваний
-                this.interruptionState.is_assistant_speaking = false;
-                this.interruptionState.is_user_speaking = false;
-                this.updateInterruptButtonState();
-
-                let statusMessage = '🔴 Отключен';
-                let systemMessage = '🔌 Соединение закрыто';
-                
-                if (code === 1000) {
-                    systemMessage = '✅ Соединение закрыто нормально';
-                } else if (code === 1006) {
-                    systemMessage = '❌ Соединение прервано неожиданно (код 1006)';
-                    statusMessage = '🔴 Ошибка соединения';
-                } else if (code === 1008) {
-                    systemMessage = '❌ Нарушение политики (возможно, проблема с аутентификацией)';
-                    statusMessage = '🔴 Ошибка аутентификации';
-                } else if (code !== 1000 && code !== 'unknown') {
-                    systemMessage = `❌ Соединение закрыто с кодом: ${code}`;
-                    if (reason && reason !== 'unknown') {
-                        systemMessage += ` (${reason})`;
-                    }
-                    statusMessage = '🔴 Ошибка';
-                }
-                
-                this.updateStatus('disconnected', statusMessage);
-                this.addMessage('system', systemMessage);
-
-                this.stopRecording();
-                this.stopPingMonitoring();
-                this.stopKeepAlive();
-                this.clearAudioQueue();
-            }
-
-            onWebSocketError(error, connectionMethod = 'unknown') {
-                console.error('WebSocket error:', error);
-                
-                let errorMessage = '❌ Ошибка WebSocket соединения';
-                let recommendations = [];
-                
-                if (connectionMethod === 'signed') {
-                    errorMessage = '❌ Ошибка подписанного соединения';
-                    recommendations.push('• Проблема с аутентификацией через signed URL');
-                } else if (connectionMethod === 'fallback' || connectionMethod === 'direct') {
-                    errorMessage = '❌ Ошибка прямого соединения';
-                    recommendations.push('• Агент может быть недоступен или отключен');
+                    // Обновляем индикатор перебивания
+                    this.voiceInterruptionIndicator.textContent = '🎤 Говорите чтобы прервать ассистента • Голосовое перебивание активно';
+                    this.voiceInterruptionIndicator.classList.remove('active');
+                    
                 } else {
-                    recommendations.push('• Неизвестная ошибка подключения');
-                }
-                
-                this.addMessage('system', errorMessage);
-                recommendations.forEach(rec => {
-                    this.addMessage('system', rec);
-                });
-                
-                this.updateStatus('disconnected', '🔴 Ошибка соединения');
-                this.connectionStateSpan.textContent = 'Ошибка';
-                this.connectBtn.disabled = false;
-                this.disconnectBtn.disabled = true;
-            }
-
-            // ✅ УЛУЧШЕННАЯ система очереди аудио остается той же
-            addToAudioQueue(audioBase64) {
-                if (this.audioQueue.length >= this.settings.maxQueueSize) {
-                    console.warn('🚨 Audio queue full, dropping oldest chunk');
-                    this.audioQueue.shift();
-                    this.audioQueueStats.dropped++;
-                }
-                
-                this.audioQueue.push(audioBase64);
-                
-                if (!this.isProcessingAudio) {
-                    this.processAudioQueue();
-                }
-            }
-
-            async processAudioQueue() {
-                if (this.isProcessingAudio || this.audioQueue.length === 0) {
-                    return;
-                }
-                
-                this.isProcessingAudio = true;
-                console.log(`🎵 Processing audio queue, ${this.audioQueue.length} chunks pending`);
-                
-                while (this.audioQueue.length > 0 && this.isConnected) {
-                    const audioBase64 = this.audioQueue.shift();
+                    console.log('🔇 Agent stopped speaking');
                     
-                    try {
-                        await this.playAudioChunk(audioBase64);
-                        this.audioQueueStats.processed++;
-                        
-                        if (this.audioQueue.length > 0) {
-                            await this.delay(this.settings.audioChunkDelay);
-                        }
-                        
-                    } catch (error) {
-                        console.error('Error playing audio chunk:', error);
-                        this.handleAudioError();
-                        break;
-                    }
-                }
-                
-                this.isProcessingAudio = false;
-                
-                // ✅ НОВАЯ обработка завершения аудио
-                if (this.audioQueue.length === 0 && this.isConnected && this.interruptionState.is_assistant_speaking) {
-                    console.log('🔊 Audio queue finished, assistant finished speaking');
-                    this.setAssistantSpeaking(false);
-                    this.resumeListening();
+                    // Возвращаемся к прослушиванию
+                    setTimeout(() => {
+                        this.resumeListening();
+                    }, 300);
                 }
             }
 
-            async playAudioChunk(audioBase64) {
-                return new Promise((resolve, reject) => {
-                    try {
-                        const audioData = atob(audioBase64);
-                        const pcmArray = new Uint8Array(audioData.length);
-                        
-                        for (let i = 0; i < audioData.length; i++) {
-                            pcmArray[i] = audioData.charCodeAt(i);
-                        }
-
-                        const wavBlob = this.createWavBlob(pcmArray, 16000, 1, 16);
-                        const audioUrl = URL.createObjectURL(wavBlob);
-                        
-                        if (this.audioContext && this.audioContext.state !== 'closed') {
-                            this.playWithWebAudio(audioUrl, resolve, reject);
-                        } else {
-                            this.playWithHtmlAudio(audioUrl, resolve, reject);
-                        }
-
-                    } catch (error) {
-                        console.error('Error processing audio chunk:', error);
-                        reject(error);
-                    }
-                });
+            resumeListening() {
+                if (this.isConnected && this.isInitialized && !this.isAgentSpeaking) {
+                    console.log('🎤 Resumed listening for voice interruption');
+                    this.updateStatus('listening', '🟢 Слушаю...');
+                    this.micAnimation.classList.remove('recording', 'speaking', 'interrupted');
+                    this.micAnimation.classList.add('listening');
+                    
+                    // Обновляем индикатор перебивания
+                    this.voiceInterruptionIndicator.textContent = '🎤 Голосовое перебивание готово • Говорите естественно';
+                    this.voiceInterruptionIndicator.classList.remove('active');
+                }
             }
 
-            async playWithWebAudio(audioUrl, resolve, reject) {
+            async startContinuousAudioCapture() {
+                if (!this.audioStream) return;
+
                 try {
-                    const response = await fetch(audioUrl);
-                    const arrayBuffer = await response.arrayBuffer();
-                    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                    console.log('🎤 Starting continuous audio capture for ElevenLabs...');
                     
-                    const source = this.audioContext.createBufferSource();
-                    source.buffer = audioBuffer;
+                    // Настраиваем аудио контекст
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
                     
-                    const gainNode = this.audioContext.createGain();
-                    source.connect(gainNode);
-                    gainNode.connect(this.audioContext.destination);
+                    const source = audioContext.createMediaStreamSource(this.audioStream);
+                    const processor = audioContext.createScriptProcessor(4096, 1, 1);
                     
-                    gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-                    gainNode.gain.linearRampToValueAtTime(1, this.audioContext.currentTime + this.settings.fadeInDuration / 1000);
-                    
-                    // ✅ НОВАЯ регистрация аудио элемента
-                    const audioWrapper = {
-                        pause: () => {
-                            try { source.stop(); } catch (e) { /* уже остановлен */ }
-                        },
-                        currentTime: 0,
-                        src: audioUrl
+                    processor.onaudioprocess = (event) => {
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN && this.isInitialized) {
+                            const inputBuffer = event.inputBuffer;
+                            const channelData = inputBuffer.getChannelData(0);
+                            
+                            // Конвертируем в PCM16 и отправляем в ElevenLabs
+                            const pcmData = this.convertToPCM16(channelData);
+                            const base64Audio = this.arrayBufferToBase64(pcmData);
+                            
+                            // ElevenLabs ожидает аудио в таком формате
+                            const audioMessage = {
+                                user_audio_chunk: base64Audio
+                            };
+                            
+                            try {
+                                this.ws.send(JSON.stringify(audioMessage));
+                            } catch (error) {
+                                console.error('Error sending audio to ElevenLabs:', error);
+                            }
+                        }
                     };
                     
-                    this.setAssistantSpeaking(true, audioWrapper);
+                    source.connect(processor);
+                    processor.connect(audioContext.destination);
                     
-                    if (this.currentAudioSource) {
-                        try {
-                            this.currentAudioSource.stop();
-                        } catch (e) {
-                            // Источник уже остановлен
-                        }
-                    }
+                    this.audioContext = audioContext;
+                    this.audioProcessor = processor;
+                    this.audioSource = source;
                     
-                    this.currentAudioSource = source;
-                    
-                    source.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
-                        this.currentAudioSource = null;
-                        
-                        // ✅ НОВАЯ очистка из отслеживания
-                        const index = this.interruptionState.current_audio_elements.indexOf(audioWrapper);
-                        if (index > -1) {
-                            this.interruptionState.current_audio_elements.splice(index, 1);
-                        }
-                        
-                        resolve();
-                    };
-                    
-                    source.onerror = (error) => {
-                        URL.revokeObjectURL(audioUrl);
-                        this.currentAudioSource = null;
-                        
-                        const index = this.interruptionState.current_audio_elements.indexOf(audioWrapper);
-                        if (index > -1) {
-                            this.interruptionState.current_audio_elements.splice(index, 1);
-                        }
-                        
-                        reject(error);
-                    };
-                    
-                    source.start();
-                    console.log('🔊 Playing audio chunk via Web Audio API with interruption tracking');
+                    this.micAnimation.classList.add('listening');
+                    console.log('✅ Continuous audio capture started for ElevenLabs');
                     
                 } catch (error) {
-                    URL.revokeObjectURL(audioUrl);
-                    console.warn('Web Audio failed, falling back to HTML5:', error);
-                    this.playWithHtmlAudio(audioUrl, resolve, reject);
+                    console.error('❌ Failed to start audio capture:', error);
+                    this.addMessage('system', `❌ Ошибка записи аудио: ${error.message}`);
                 }
             }
 
-            playWithHtmlAudio(audioUrl, resolve, reject) {
-                const audio = new Audio(audioUrl);
-                audio.volume = 0.8;
+            convertToPCM16(float32Array) {
+                const buffer = new ArrayBuffer(float32Array.length * 2);
+                const view = new DataView(buffer);
                 
-                // ✅ НОВАЯ регистрация HTML5 аудио элемента
-                this.setAssistantSpeaking(true, audio);
+                for (let i = 0; i < float32Array.length; i++) {
+                    let sample = Math.max(-1, Math.min(1, float32Array[i]));
+                    const pcmSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    view.setInt16(i * 2, pcmSample, true);
+                }
                 
-                audio.onended = () => {
-                    URL.revokeObjectURL(audioUrl);
-                    
-                    const index = this.interruptionState.current_audio_elements.indexOf(audio);
-                    if (index > -1) {
-                        this.interruptionState.current_audio_elements.splice(index, 1);
-                    }
-                    
-                    resolve();
-                };
-                
-                audio.onerror = (error) => {
-                    URL.revokeObjectURL(audioUrl);
-                    
-                    const index = this.interruptionState.current_audio_elements.indexOf(audio);
-                    if (index > -1) {
-                        this.interruptionState.current_audio_elements.splice(index, 1);
-                    }
-                    
-                    reject(error);
-                };
-                
-                audio.play().catch(error => {
-                    URL.revokeObjectURL(audioUrl);
-                    
-                    const index = this.interruptionState.current_audio_elements.indexOf(audio);
-                    if (index > -1) {
-                        this.interruptionState.current_audio_elements.splice(index, 1);
-                    }
-                    
-                    reject(error);
-                });
-                
-                console.log('🔊 Playing audio chunk via HTML5 audio (fallback)');
+                return new Uint8Array(buffer);
             }
 
-            delay(ms) {
-                return new Promise(resolve => setTimeout(resolve, ms));
+            arrayBufferToBase64(buffer) {
+                let binary = '';
+                const bytes = new Uint8Array(buffer);
+                const len = bytes.byteLength;
+                
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                
+                return btoa(binary);
             }
 
-            // ✅ УЛУЧШЕННОЕ возобновление прослушивания
-            resumeListening() {
-                setTimeout(() => {
-                    if (this.isConnected && !this.isProcessingAudio && this.audioQueue.length === 0) {
-                        this.setAssistantSpeaking(false);
+            playAudio(audioBase64) {
+                try {
+                    // Декодируем base64 аудио от ElevenLabs
+                    const audioData = atob(audioBase64);
+                    const pcmArray = new Uint8Array(audioData.length);
+                    
+                    for (let i = 0; i < audioData.length; i++) {
+                        pcmArray[i] = audioData.charCodeAt(i);
+                    }
+
+                    // Создаем WAV blob и воспроизводим
+                    const wavBlob = this.createWavBlob(pcmArray, 16000, 1, 16);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+                    
+                    const audio = new Audio(audioUrl);
+                    audio.volume = 0.8;
+                    
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
                         
-                        this.updateStatus('listening', '🟢 Слушаю...');
-                        this.micAnimation.classList.remove('recording', 'speaking');
-                        this.micAnimation.classList.add('listening');
-                        console.log('🎤 Resumed listening after agent finished speaking');
-                    }
-                }, this.settings.resumeListeningDelay);
-            }
-
-            // ✅ НОВАЯ очистка очереди аудио
-            clearAudioQueue() {
-                console.log('🧹 Clearing audio queue');
-                this.audioQueue = [];
-                this.isProcessingAudio = false;
-                
-                if (this.currentAudioSource) {
-                    try {
-                        this.currentAudioSource.stop();
-                        this.currentAudioSource = null;
-                    } catch (error) {
-                        console.log('Audio source already stopped:', error);
-                    }
-                }
-                
-                if (this.audioChunkTimeout) {
-                    clearTimeout(this.audioChunkTimeout);
-                    this.audioChunkTimeout = null;
-                }
-            }
-
-            handleAudioError() {
-                console.warn('🚨 Audio error, clearing queue and resuming');
-                this.clearAudioQueue();
-                
-                if (this.isConnected) {
-                    this.resumeListening();
+                        // Проверяем нужно ли остановить говорение ассистента
+                        setTimeout(() => {
+                            if (this.isAgentSpeaking) {
+                                this.setAgentSpeaking(false);
+                            }
+                        }, 100);
+                    };
+                    
+                    audio.onerror = (error) => {
+                        console.error('Audio playback error:', error);
+                        URL.revokeObjectURL(audioUrl);
+                    };
+                    
+                    audio.play().catch(error => {
+                        console.error('Failed to play audio:', error);
+                        URL.revokeObjectURL(audioUrl);
+                    });
+                    
+                } catch (error) {
+                    console.error('Error playing audio:', error);
                 }
             }
 
@@ -1788,200 +1123,43 @@
                 return new Blob([arrayBuffer], { type: 'audio/wav' });
             }
 
-            startRecording() {
-                if (!this.audioStream) return;
-
-                try {
-                    console.log('🎤 Starting audio recording with PCM 16kHz format...');
+            manualInterrupt() {
+                if (this.isAgentSpeaking && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    console.log('⚡ Manual interrupt triggered');
                     
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                        sampleRate: 16000
+                    // Отправляем команду ручного перебивания в ElevenLabs
+                    const interruptMessage = {
+                        type: "interruption",
+                        timestamp: Date.now()
+                    };
+                    
+                    this.ws.send(JSON.stringify(interruptMessage));
+                    
+                    // Локально обрабатываем перебивание
+                    this.handleVoiceInterruption({ 
+                        type: "interruption",
+                        source: "manual"
                     });
-                    
-                    if (!this.audioContext) {
-                        throw new Error('AudioContext not supported');
-                    }
-                    
-                    this.audioSource = this.audioContext.createMediaStreamSource(this.audioStream);
-                    this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
-                    
-                    this.audioProcessor.onaudioprocess = (event) => {
-                        if (this.ws && 
-                            this.ws.readyState === WebSocket.OPEN && 
-                            !this.isAgentSpeaking &&
-                            !this.isProcessingAudio &&
-                            this.isInitialized) {
-                            
-                            const inputBuffer = event.inputBuffer;
-                            const channelData = inputBuffer.getChannelData(0);
-                            
-                            const volume = this.calculateVolume(channelData);
-                            
-                            if (volume > this.voiceActivityThreshold) {
-                                const pcmData = this.convertToPCM16(channelData);
-                                const base64Audio = this.arrayBufferToBase64(pcmData);
-                                
-                                const audioMessage = {
-                                    user_audio_chunk: base64Audio
-                                };
-                                
-                                try {
-                                    this.ws.send(JSON.stringify(audioMessage));
-                                    this.lastActivityTime = Date.now();
-                                    this.updateVolumeIndicator(volume);
-                                } catch (error) {
-                                    console.error('Error sending audio chunk:', error);
-                                }
-                            } else {
-                                this.updateVolumeIndicator(volume);
-                            }
-                        }
-                    };
-                    
-                    this.audioSource.connect(this.audioProcessor);
-                    this.audioProcessor.connect(this.audioContext.destination);
-                    
-                    this.micAnimation.classList.add('listening');
-                    this.updateStatus('listening', '🟢 Слушаю...');
-                    
-                    if (this.audioSystemSpan) {
-                        this.audioSystemSpan.textContent = `AudioContext (PCM 16kHz) + Interruption v4.0`;
-                    }
-                    if (this.bufferInfoSpan) {
-                        this.bufferInfoSpan.textContent = `${this.audioContext.sampleRate}Hz, 4096 samples`;
-                    }
-                    
-                    console.log('✅ Audio recording started successfully');
-                    
-                } catch (error) {
-                    console.error('❌ Failed to start audio recording:', error);
-                    this.addMessage('system', `❌ Ошибка записи аудио: ${error.message}`);
-                    this.startMediaRecorderFallback();
                 }
             }
 
-            startMediaRecorderFallback() {
-                console.log('🔄 Trying MediaRecorder fallback...');
+            updateInterruptionStats() {
+                if (this.interruptionCountSpan) {
+                    this.interruptionCountSpan.textContent = this.interruptionState.count;
+                }
                 
-                try {
-                    this.mediaRecorder = new MediaRecorder(this.audioStream, {
-                        mimeType: 'audio/webm;codecs=opus',
-                        audioBitsPerSecond: 128000
-                    });
-
-                    this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0 && 
-                            this.ws && 
-                            this.ws.readyState === WebSocket.OPEN && 
-                            !this.isAgentSpeaking &&
-                            !this.isProcessingAudio &&
-                            this.isInitialized) {
-                            
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                                try {
-                                    const base64 = reader.result.split(',')[1];
-                                    
-                                    const audioMessage = {
-                                        user_audio_chunk: base64
-                                    };
-                                    
-                                    this.ws.send(JSON.stringify(audioMessage));
-                                    this.lastActivityTime = Date.now();
-                                    
-                                    console.log('📤 Sent audio chunk (fallback mode)');
-                                    
-                                } catch (error) {
-                                    console.error('Error sending fallback audio chunk:', error);
-                                }
-                            };
-                            
-                            reader.onerror = (error) => {
-                                console.error('FileReader error:', error);
-                            };
-                            
-                            reader.readAsDataURL(event.data);
-                        }
-                    };
-
-                    this.mediaRecorder.onerror = (event) => {
-                        console.error('MediaRecorder fallback error:', event.error);
-                        this.addMessage('system', `❌ Ошибка записи (fallback): ${event.error}`);
-                    };
-
-                    this.mediaRecorder.start(250);
-                    this.micAnimation.classList.add('listening');
-                    
-                    if (this.audioSystemSpan) {
-                        this.audioSystemSpan.textContent = 'MediaRecorder (Fallback)';
-                    }
-                    this.addMessage('system', '⚠️ Используется fallback режим записи');
-                    console.log('📼 MediaRecorder fallback started');
-                    
-                } catch (error) {
-                    console.error('❌ MediaRecorder fallback also failed:', error);
-                    this.addMessage('system', '❌ Все методы записи аудио не удались');
+                if (this.lastInterruptionSpan && this.interruptionState.lastTime > 0) {
+                    const lastTime = new Date(this.interruptionState.lastTime);
+                    this.lastInterruptionSpan.textContent = lastTime.toLocaleTimeString();
+                }
+                
+                if (this.interruptionModeSpan) {
+                    this.interruptionModeSpan.textContent = 'ElevenLabs VAD';
                 }
             }
 
-            convertToPCM16(float32Array) {
-                const buffer = new ArrayBuffer(float32Array.length * 2);
-                const view = new DataView(buffer);
-                
-                for (let i = 0; i < float32Array.length; i++) {
-                    let sample = Math.max(-1, Math.min(1, float32Array[i]));
-                    const pcmSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-                    view.setInt16(i * 2, pcmSample, true);
-                }
-                
-                return new Uint8Array(buffer);
-            }
-
-            arrayBufferToBase64(buffer) {
-                let binary = '';
-                const bytes = new Uint8Array(buffer);
-                const len = bytes.byteLength;
-                
-                for (let i = 0; i < len; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                
-                return btoa(binary);
-            }
-
-            calculateVolume(channelData) {
-                let sum = 0;
-                for (let i = 0; i < channelData.length; i++) {
-                    sum += channelData[i] * channelData[i];
-                }
-                
-                const rms = Math.sqrt(sum / channelData.length);
-                return Math.min(1, rms * 10);
-            }
-
-            updateVolumeIndicator(volume) {
-                if (volume > this.voiceActivityThreshold) {
-                    this.lastUserSpeechTime = Date.now();
-                }
-                
-                if (this.volumeBar) {
-                    const percentage = volume * 100;
-                    this.volumeBar.style.width = percentage + '%';
-                    
-                    if (volume > 0.3) {
-                        this.volumeBar.style.background = 'linear-gradient(45deg, #2ed573, #1e90ff)';
-                    } else if (volume > 0.1) {
-                        this.volumeBar.style.background = 'linear-gradient(45deg, #ffa502, #ff6348)';
-                    } else {
-                        this.volumeBar.style.background = 'linear-gradient(45deg, #667eea, #764ba2)';
-                    }
-                }
-            }
-
-            stopRecording() {
-                console.log('🛑 Stopping audio recording...');
-                
-                this.clearAudioQueue();
+            stopAudioCapture() {
+                console.log('🛑 Stopping audio capture...');
                 
                 if (this.audioProcessor) {
                     this.audioProcessor.disconnect();
@@ -2002,34 +1180,13 @@
                     this.audioContext = null;
                 }
                 
-                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-                    this.mediaRecorder.stop();
-                    this.mediaRecorder = null;
-                }
-                
                 this.micAnimation.classList.remove('recording', 'listening', 'interrupted', 'speaking');
-                
-                if (this.volumeBar) {
-                    this.volumeBar.style.width = '0%';
-                }
-                
-                if (this.audioSystemSpan) {
-                    this.audioSystemSpan.textContent = 'Остановлено';
-                }
-                console.log('✅ Audio recording stopped');
-            }
-
-            restartRecording() {
-                if (this.isConnected && this.isInitialized) {
-                    console.log('🔄 Restarting audio recording...');
-                    this.stopRecording();
-                    setTimeout(() => {
-                        this.startRecording();
-                    }, 500);
-                }
+                console.log('✅ Audio capture stopped');
             }
 
             disconnect() {
+                console.log('🔌 Disconnecting from ElevenLabs...');
+                
                 if (this.ws) {
                     if (this.ws.readyState === WebSocket.OPEN) {
                         try {
@@ -2046,55 +1203,109 @@
                     this.audioStream = null;
                 }
 
-                if (this.initializationTimeout) {
-                    clearTimeout(this.initializationTimeout);
-                    this.initializationTimeout = null;
-                }
-
-                this.stopRecording();
-                this.stopPingMonitoring();
-                this.stopKeepAlive();
+                this.stopAudioCapture();
 
                 this.isConnected = false;
                 this.isInitialized = false;
                 this.isAgentSpeaking = false;
                 this.conversationId = null;
-                this.vadScore = 0;
                 
-                // ✅ Сбрасываем состояние перебиваний
-                this.interruptionState.is_assistant_speaking = false;
-                this.interruptionState.is_user_speaking = false;
-                this.updateInterruptButtonState();
+                // Сбрасываем состояние перебиваний
+                this.interruptionState.count = 0;
+                this.interruptionState.lastTime = 0;
+                this.updateInterruptionStats();
                 
-                if (this.vadScoreSpan) {
-                    this.vadScoreSpan.textContent = '0.00';
-                }
-                if (this.volumeBar) {
-                    this.volumeBar.style.width = '0%';
-                }
+                // Обновляем UI
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
+                this.interruptBtn.disabled = true;
+                
                 if (this.connectionStateSpan) {
                     this.connectionStateSpan.textContent = 'Отключен';
                 }
                 
-                this.connectionRetryCount = 0;
-                this.lastActivityTime = Date.now();
+                if (this.conversationIdSpan) {
+                    this.conversationIdSpan.textContent = '-';
+                }
+                
+                // Обновляем индикатор перебивания
+                this.voiceInterruptionIndicator.textContent = '🎤 Голосовое перебивание: Отключено • Подключитесь для активации';
+                this.voiceInterruptionIndicator.classList.remove('active');
+            }
+
+            onWebSocketClose(event) {
+                const code = event?.code || 'unknown';
+                const reason = event?.reason || 'unknown';
+                
+                console.log('❌ ElevenLabs WebSocket disconnected. Code:', code, 'Reason:', reason);
+                this.isConnected = false;
+                this.isAgentSpeaking = false;
+                
+                // Обновляем UI
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
+                this.interruptBtn.disabled = true;
+                this.connectionStateSpan.textContent = 'Отключен';
+                this.micAnimation.classList.remove('recording', 'listening', 'interrupted', 'speaking');
+
+                let statusMessage = '🔴 Отключен';
+                let systemMessage = '🔌 Соединение с ElevenLabs закрыто';
+                
+                if (code === 1000) {
+                    systemMessage = '✅ Соединение закрыто нормально';
+                } else if (code === 1006) {
+                    systemMessage = '❌ Соединение прервано неожиданно (код 1006)';
+                    statusMessage = '🔴 Ошибка соединения';
+                } else if (code === 1008) {
+                    systemMessage = '❌ Нарушение политики (возможно, проблема с аутентификацией)';
+                    statusMessage = '🔴 Ошибка аутентификации';
+                } else if (code !== 1000 && code !== 'unknown') {
+                    systemMessage = `❌ Соединение закрыто с кодом: ${code}`;
+                    if (reason && reason !== 'unknown') {
+                        systemMessage += ` (${reason})`;
+                    }
+                    statusMessage = '🔴 Ошибка';
+                }
+                
+                this.updateStatus('disconnected', statusMessage);
+                this.addMessage('system', systemMessage);
+
+                this.stopAudioCapture();
+            }
+
+            onWebSocketError(error, connectionMethod = 'unknown') {
+                console.error('❌ ElevenLabs WebSocket error:', error);
+                
+                let errorMessage = '❌ Ошибка WebSocket соединения с ElevenLabs';
+                let recommendations = [];
+                
+                if (connectionMethod === 'signed') {
+                    errorMessage = '❌ Ошибка подписанного соединения';
+                    recommendations.push('• Проблема с аутентификацией через signed URL');
+                } else if (connectionMethod === 'fallback' || connectionMethod === 'direct') {
+                    errorMessage = '❌ Ошибка прямого соединения';
+                    recommendations.push('• Агент может быть недоступен или отключен');
+                } else {
+                    recommendations.push('• Неизвестная ошибка подключения');
+                }
+                
+                this.addMessage('system', errorMessage);
+                recommendations.forEach(rec => {
+                    this.addMessage('system', rec);
+                });
+                
+                this.updateStatus('disconnected', '🔴 Ошибка соединения');
+                this.connectionStateSpan.textContent = 'Ошибка';
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
+                this.interruptBtn.disabled = true;
             }
 
             updateStatus(className, text) {
                 if (this.status) {
                     this.status.className = `status ${className}`;
-                    
-                    // ✅ НОВАЯ статистика перебиваний в статусе
-                    let statusText = text;
-                    if (this.interruptionState.interruption_count > 0) {
-                        statusText += ` (Перебиваний: ${this.interruptionState.interruption_count})`;
-                    }
-                    
-                    this.status.textContent = statusText;
+                    this.status.textContent = text;
                 }
-                
-                // Обновляем состояние кнопки прерывания
-                this.updateInterruptButtonState();
             }
 
             addMessage(type, content) {
@@ -2107,38 +1318,20 @@
                     this.chatArea.scrollTop = this.chatArea.scrollHeight;
                 }
             }
-
-            updateAudioSettings(newSettings) {
-                this.settings = { ...this.settings, ...newSettings };
-                console.log('⚙️ Audio settings updated:', this.settings);
-            }
-
-            getAudioQueueStats() {
-                return {
-                    queueLength: this.audioQueue.length,
-                    isProcessing: this.isProcessingAudio,
-                    isAgentSpeaking: this.isAgentSpeaking,
-                    currentSettings: this.settings,
-                    processed: this.audioQueueStats.processed,
-                    dropped: this.audioQueueStats.dropped,
-                    // ✅ НОВАЯ статистика перебиваний
-                    interruptions: this.interruptionState.interruption_count,
-                    protectionTime: this.interruptionState.protection_time,
-                    deviceType: this.getDeviceType()
-                };
-            }
         }
 
+        // Инициализация при загрузке страницы
         document.addEventListener('DOMContentLoaded', () => {
-            console.log('🚀 DOM loaded, initializing VoiceChat v4.0 with Fast Interruption System...');
+            console.log('🚀 DOM loaded, initializing ElevenLabs Voice Chat v4.0...');
             try {
-                window.voiceChat = new VoiceChat();
-                console.log('✅ VoiceChat v4.0 with Fast Interruption System initialized successfully');
+                window.elevenLabsVoiceChat = new ElevenLabsVoiceChat();
+                console.log('✅ ElevenLabs Voice Chat v4.0 с голосовым перебиванием инициализирован успешно');
             } catch (error) {
-                console.error('❌ Failed to initialize VoiceChat:', error);
+                console.error('❌ Failed to initialize ElevenLabs Voice Chat:', error);
             }
         });
         
+        // Глобальная обработка ошибок
         window.addEventListener('error', (event) => {
             console.error('🚨 Global JavaScript Error:', event.error);
             console.error('🚨 Error details:', {
