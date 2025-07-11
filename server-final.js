@@ -122,6 +122,22 @@ app.get('/api/signed-url', async (req, res) => {
   console.log('🔐 Signed URL requested');
   
   try {
+    // Сначала проверяем что агент существует
+    console.log('Checking agent availability before signed URL...');
+    const agentExists = await checkAgentExists();
+    
+    if (!agentExists) {
+      console.log('❌ Agent not found, cannot create signed URL');
+      return res.status(404).json({
+        error: 'Agent not found',
+        fallback_url: `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${AGENT_ID}`,
+        agent_id: AGENT_ID,
+        details: 'Agent does not exist or is not accessible',
+        status: 'agent_not_found',
+        timestamp: new Date().toISOString()
+      });
+    }
+    
     const signedUrl = await getSignedUrl();
     console.log('✅ Signed URL obtained successfully');
     
@@ -135,17 +151,76 @@ app.get('/api/signed-url', async (req, res) => {
   } catch (error) {
     console.error('❌ Signed URL error:', error.message);
     
-    // Fallback URL if signed URL fails
-    res.status(200).json({
+    // Более детальная обработка ошибок
+    let errorDetails = error.message;
+    let statusCode = 500;
+    let status = 'error';
+    
+    if (error.message.includes('Unauthorized')) {
+      statusCode = 401;
+      status = 'unauthorized';
+      errorDetails = 'Invalid API key or insufficient permissions';
+    } else if (error.message.includes('Agent not found')) {
+      statusCode = 404;
+      status = 'agent_not_found';
+      errorDetails = 'Agent ID not found in ElevenLabs';
+    } else if (error.message.includes('Rate limit')) {
+      statusCode = 429;
+      status = 'rate_limited';
+      errorDetails = 'API rate limit exceeded';
+    } else if (error.message.includes('timeout')) {
+      statusCode = 504;
+      status = 'timeout';
+      errorDetails = 'ElevenLabs API timeout';
+    }
+    
+    res.status(statusCode).json({
       error: 'Signed URL failed',
       fallback_url: `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${AGENT_ID}`,
       agent_id: AGENT_ID,
-      details: error.message,
-      status: 'fallback',
-      timestamp: new Date().toISOString()
+      details: errorDetails,
+      status: status,
+      timestamp: new Date().toISOString(),
+      recommendations: getErrorRecommendations(status)
     });
   }
 });
+
+// Helper function for error recommendations
+function getErrorRecommendations(status) {
+  switch (status) {
+    case 'unauthorized':
+      return [
+        'Check your ElevenLabs API key',
+        'Verify API key has proper permissions',
+        'Check if API key is expired'
+      ];
+    case 'agent_not_found':
+      return [
+        'Verify agent ID in ElevenLabs Dashboard',
+        'Check if agent is active and published',
+        'Ensure agent is accessible with current API key'
+      ];
+    case 'rate_limited':
+      return [
+        'Wait before retrying',
+        'Check your ElevenLabs usage limits',
+        'Consider upgrading your plan'
+      ];
+    case 'timeout':
+      return [
+        'Check internet connection',
+        'Retry after a few moments',
+        'ElevenLabs API may be experiencing issues'
+      ];
+    default:
+      return [
+        'Try refreshing the page',
+        'Check ElevenLabs service status',
+        'Contact support if problem persists'
+      ];
+  }
+}
 
 // Function to get signed URL with enhanced error handling
 function getSignedUrl() {
@@ -339,46 +414,102 @@ app.get('/api/diagnostics', async (req, res) => {
       signed_url: '/api/signed-url',
       diagnostics: '/api/diagnostics'
     },
-    recommendations: []
+    recommendations: [],
+    tests: {}
   };
 
+  // Test 1: ElevenLabs API accessibility
   try {
-    // Test ElevenLabs API
     await checkElevenLabsAPI();
     diagnostics.elevenlabs = {
       status: 'accessible',
-      message: 'API is responding'
+      message: 'API is responding',
+      test_endpoint: '/v1/user'
     };
     diagnostics.recommendations.push('✅ ElevenLabs API доступен');
+    diagnostics.tests.api_connectivity = 'passed';
   } catch (error) {
     diagnostics.elevenlabs = {
       status: 'error',
-      message: error.message
+      message: error.message,
+      test_endpoint: '/v1/user'
     };
     diagnostics.recommendations.push('❌ Проблема с ElevenLabs API');
     diagnostics.recommendations.push('💡 Проверьте API ключ и интернет-соединение');
+    diagnostics.tests.api_connectivity = 'failed';
   }
 
+  // Test 2: Agent existence and accessibility
   try {
-    // Test agent existence
     const agentExists = await checkAgentExists();
-    diagnostics.agent = {
-      status: agentExists ? 'found' : 'not_found',
-      id: AGENT_ID
-    };
-    
     if (agentExists) {
+      diagnostics.agent = {
+        status: 'found',
+        id: AGENT_ID,
+        test_endpoint: `/v1/convai/agents/${AGENT_ID}`
+      };
       diagnostics.recommendations.push('✅ Агент найден и доступен');
+      diagnostics.tests.agent_accessibility = 'passed';
     } else {
+      diagnostics.agent = {
+        status: 'not_found',
+        id: AGENT_ID,
+        test_endpoint: `/v1/convai/agents/${AGENT_ID}`
+      };
       diagnostics.recommendations.push('❌ Агент не найден');
       diagnostics.recommendations.push('💡 Проверьте ID агента в ElevenLabs Dashboard');
+      diagnostics.tests.agent_accessibility = 'failed';
     }
   } catch (error) {
     diagnostics.agent = {
       status: 'error',
-      error: error.message
+      error: error.message,
+      id: AGENT_ID
     };
     diagnostics.recommendations.push('⚠️ Не удалось проверить статус агента');
+    diagnostics.tests.agent_accessibility = 'error';
+  }
+
+  // Test 3: Signed URL generation
+  try {
+    const signedUrl = await getSignedUrl();
+    diagnostics.signed_url = {
+      status: 'working',
+      message: 'Can generate signed URLs',
+      url_preview: signedUrl.substring(0, 80) + '...'
+    };
+    diagnostics.recommendations.push('✅ Signed URL генерация работает');
+    diagnostics.tests.signed_url_generation = 'passed';
+  } catch (error) {
+    diagnostics.signed_url = {
+      status: 'error',
+      message: error.message
+    };
+    diagnostics.recommendations.push('⚠️ Проблема с генерацией Signed URL');
+    diagnostics.recommendations.push('💡 Будет использовано прямое подключение');
+    diagnostics.tests.signed_url_generation = 'failed';
+  }
+
+  // Overall health assessment
+  const passedTests = Object.values(diagnostics.tests).filter(t => t === 'passed').length;
+  const totalTests = Object.keys(diagnostics.tests).length;
+  
+  diagnostics.overall = {
+    health_score: `${passedTests}/${totalTests}`,
+    status: passedTests === totalTests ? 'healthy' : 
+            passedTests > 0 ? 'partial' : 'unhealthy',
+    ready_for_connection: passedTests >= 1 // Минимум API должен быть доступен
+  };
+
+  // Additional recommendations based on overall health
+  if (diagnostics.overall.status === 'unhealthy') {
+    diagnostics.recommendations.push('🚨 Система не готова к работе');
+    diagnostics.recommendations.push('💡 Проверьте все настройки и попробуйте позже');
+  } else if (diagnostics.overall.status === 'partial') {
+    diagnostics.recommendations.push('⚠️ Система частично готова');
+    diagnostics.recommendations.push('💡 Некоторые функции могут не работать');
+  } else {
+    diagnostics.recommendations.push('🎉 Система полностью готова к работе');
   }
 
   res.json(diagnostics);
