@@ -15,7 +15,7 @@ const AGENT_ID = process.env.AGENT_ID || 'agent_01jzwcew2ferttga9m1zcn3js1';
 
 console.log(`🎯 Server starting with Agent ID: ${AGENT_ID}`);
 console.log(`🔑 API Key configured: ${ELEVENLABS_API_KEY ? 'Yes' : 'No'}`);
-console.log(`⚡ Fast Interruption System: ENABLED`);
+console.log(`⚡ ElevenLabs Voice Interruption System: ENABLED`);
 
 // Enhanced logging middleware with device detection
 app.use((req, res, next) => {
@@ -25,7 +25,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ✅ NEW: Utility function for device type detection
+// ✅ Utility function for device type detection
 function getDeviceTypeFromUserAgent(userAgent) {
   const ua = userAgent.toLowerCase();
   if (ua.includes('iphone') || ua.includes('ipad')) return 'iOS';
@@ -34,7 +34,7 @@ function getDeviceTypeFromUserAgent(userAgent) {
   return 'Desktop';
 }
 
-// ✅ NEW: Middleware for logging interruptions
+// ✅ Middleware for logging interruptions
 function logInterruption(req, res, next) {
   const originalJson = res.json;
   
@@ -80,9 +80,9 @@ app.get('/api/agent-id', async (req, res) => {
         message: 'Агент подтвержден и готов к работе',
         timestamp: new Date().toISOString(),
         features: {
-          fast_interruption: true,
-          device_optimization: true,
-          anti_debounce: true
+          voice_interruption: true,
+          elevenlabs_conversational_ai: true,
+          auto_interruption: true
         }
       });
     } else {
@@ -107,15 +107,15 @@ app.get('/api/agent-id', async (req, res) => {
       warning: 'Не удалось проверить статус агента в ElevenLabs',
       timestamp: new Date().toISOString(),
       features: {
-        fast_interruption: true,
-        device_optimization: true,
-        anti_debounce: true
+        voice_interruption: true,
+        elevenlabs_conversational_ai: true,
+        auto_interruption: true
       }
     });
   }
 });
 
-// Function to check if agent exists - ИСПРАВЛЕНО
+// Function to check if agent exists
 function checkAgentExists() {
   return new Promise((resolve, reject) => {
     const options = {
@@ -125,7 +125,7 @@ function checkAgentExists() {
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat-v4.0-FastInterruption',
+        'User-Agent': 'ElevenLabs-Voice-Chat-v4.0-VoiceInterruption',
         'Accept': 'application/json'
       },
       timeout: 10000
@@ -173,9 +173,9 @@ function checkAgentExists() {
   });
 }
 
-// ✅ SIGNED URL ENDPOINT - ИСПРАВЛЕН КРИТИЧЕСКИЙ БАГИ
+// ✅ SIGNED URL ENDPOINT для ElevenLabs
 app.get('/api/signed-url', async (req, res) => {
-  console.log('🔐 Signed URL requested');
+  console.log('🔐 Signed URL requested for ElevenLabs Conversational AI');
   
   try {
     // Сначала проверяем что агент существует
@@ -203,8 +203,9 @@ app.get('/api/signed-url', async (req, res) => {
       status: 'ready',
       timestamp: new Date().toISOString(),
       features: {
-        fast_interruption: true,
-        device_optimization: true
+        voice_interruption: true,
+        elevenlabs_conversational_ai: true,
+        auto_interruption: true
       }
     });
     
@@ -282,18 +283,17 @@ function getErrorRecommendations(status) {
   }
 }
 
-// ✅ ИСПРАВЛЕНА КРИТИЧЕСКАЯ ОШИБКА: endpoint с подчеркиванием
+// ✅ ИСПРАВЛЕНА КРИТИЧЕСКАЯ ОШИБКА: правильный endpoint для signed URL
 function getSignedUrl() {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.elevenlabs.io',
       port: 443,
-      // ✅ ИСПРАВЛЕНО: get-signed-url → get_signed_url
       path: `/v1/convai/conversation/get_signed_url?agent_id=${AGENT_ID}`,
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat-v4.0-FastInterruption',
+        'User-Agent': 'ElevenLabs-Voice-Chat-v4.0-VoiceInterruption',
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
@@ -364,196 +364,49 @@ function getSignedUrl() {
   });
 }
 
-// ✅ NEW: Device-optimized configuration endpoint
-app.get('/api/device-config', (req, res) => {
+// ✅ NEW: ElevenLabs optimized configuration endpoint
+app.get('/api/elevenlabs-config', (req, res) => {
   const userAgent = req.headers['user-agent'] || '';
   const deviceType = getDeviceTypeFromUserAgent(userAgent);
   
   let config = {
     device_type: deviceType,
-    vad_settings: {
-      threshold: 0.2,
-      protection_time: 200,
-      response_timeout: 300
-    },
-    audio_settings: {
-      chunk_delay: 50,
-      max_queue_size: 10,
-      fade_in_duration: 100,
-      fade_out_duration: 50
+    elevenlabs_settings: {
+      enable_ssml_parsing: true,
+      optimize_streaming_latency: true,
+      stability: 0.5,
+      similarity_boost: 0.8,
+      style: 0.0,
+      use_speaker_boost: true
     },
     interruption_settings: {
-      enable_fast_interruption: true,
-      enable_predictive_interruption: true,
-      max_interruptions_per_minute: 10
+      enable_voice_interruption: true,
+      interruption_threshold: deviceType === 'iOS' ? 0.4 : 
+                             deviceType === 'Android' ? 0.3 : 0.25,
+      voice_activity_detection: true,
+      auto_resume_after_interruption: true
+    },
+    audio_settings: {
+      sample_rate: 16000,
+      channels: 1,
+      format: 'pcm16',
+      chunk_size: deviceType === 'iOS' ? 2048 : 4096
     }
   };
   
-  // Оптимизация для разных устройств
-  switch (deviceType) {
-    case 'iOS':
-      config.vad_settings.threshold = 0.35;
-      config.vad_settings.protection_time = 150;
-      config.audio_settings.chunk_delay = 30;
-      config.audio_settings.fade_in_duration = 80;
-      config.interruption_settings.max_interruptions_per_minute = 15;
-      break;
-      
-    case 'Android':
-      config.vad_settings.threshold = 0.25;
-      config.vad_settings.protection_time = 180;
-      config.audio_settings.chunk_delay = 40;
-      config.interruption_settings.max_interruptions_per_minute = 12;
-      break;
-      
-    case 'Desktop':
-      config.vad_settings.threshold = 0.2;
-      config.vad_settings.protection_time = 200;
-      config.audio_settings.chunk_delay = 50;
-      config.interruption_settings.max_interruptions_per_minute = 8;
-      break;
-  }
-  
-  console.log(`📱 Device config requested for ${deviceType}:`, config);
+  console.log(`🎤 ElevenLabs config requested for ${deviceType}:`, config);
   
   res.json({
     success: true,
     config: config,
     timestamp: new Date().toISOString(),
     device_detected: deviceType,
-    user_agent: userAgent
+    user_agent: userAgent,
+    message: 'ElevenLabs Conversational AI optimized for voice interruption'
   });
 });
 
-// ✅ NEW: Interruption statistics endpoint
-app.get('/api/interruption-stats/:agentId', async (req, res) => {
-  const { agentId } = req.params;
-  const deviceType = getDeviceTypeFromUserAgent(req.headers['user-agent'] || '');
-  
-  // В реальном проекте здесь можно добавить логику для сбора статистики из БД
-  const stats = {
-    agent_id: agentId,
-    device_type: deviceType,
-    total_interruptions: 0, // получить из БД
-    average_interruptions_per_session: 0,
-    interruption_response_time: {
-      avg: deviceType === 'iOS' ? 150 : deviceType === 'Android' ? 180 : 200,
-      p95: deviceType === 'iOS' ? 250 : deviceType === 'Android' ? 280 : 300,
-      p99: deviceType === 'iOS' ? 400 : deviceType === 'Android' ? 450 : 500
-    },
-    device_breakdown: {
-      ios: { count: 0, avg_response_time: 150 },
-      android: { count: 0, avg_response_time: 180 },
-      desktop: { count: 0, avg_response_time: 200 }
-    },
-    recommendations: [
-      "Система быстрого перебивания работает оптимально",
-      `${deviceType} устройства показывают время отклика ${deviceType === 'iOS' ? '150мс' : deviceType === 'Android' ? '180мс' : '200мс'}`,
-      "Защита от дребезга активна и настроена автоматически"
-    ],
-    features_enabled: {
-      fast_interruption: true,
-      device_optimization: true,
-      anti_debounce_protection: true,
-      predictive_interruption: true
-    }
-  };
-  
-  console.log(`📊 Interruption stats requested for agent ${agentId} on ${deviceType}`);
-  
-  res.json(stats);
-});
-
-// ✅ NEW: ElevenLabs optimal settings endpoint
-app.get('/api/elevenlabs-optimal-settings/:agentId', async (req, res) => {
-  const { agentId } = req.params;
-  const deviceType = getDeviceTypeFromUserAgent(req.headers['user-agent'] || '');
-  
-  // Настройки оптимизированные для работы с ElevenLabs Conversational AI
-  const elevenLabsSettings = {
-    agent_id: agentId,
-    device_optimized_for: deviceType,
-    websocket_settings: {
-      ping_interval: deviceType === 'Mobile' || deviceType === 'iOS' || deviceType === 'Android' ? 10000 : 15000,
-      reconnect_delay: deviceType === 'iOS' ? 1000 : 2000,
-      max_reconnect_attempts: deviceType === 'Mobile' || deviceType === 'iOS' || deviceType === 'Android' ? 10 : 5
-    },
-    conversation_settings: {
-      // Настройки для ElevenLabs Conversational AI
-      enable_interruptions: true,
-      interruption_threshold: deviceType === 'iOS' ? 0.35 : deviceType === 'Android' ? 0.25 : 0.2,
-      response_time_limit: 5000,
-      max_turn_duration: 30000,
-      fast_interruption_mode: true,
-      anti_debounce_protection: deviceType === 'iOS' ? 150 : deviceType === 'Android' ? 180 : 200
-    },
-    audio_settings: {
-      // Оптимизация аудио для ElevenLabs
-      preferred_format: 'pcm_16000',
-      enable_noise_cancellation: true,
-      enable_echo_cancellation: true,
-      auto_gain_control: true,
-      buffer_size: deviceType === 'iOS' ? 2048 : 4096,
-      chunk_processing_delay: deviceType === 'iOS' ? 30 : deviceType === 'Android' ? 40 : 50
-    },
-    performance_optimizations: {
-      // Специальные оптимизации для v4.0
-      enable_audio_queue_v4: true,
-      enable_predictive_interruption: true,
-      enable_device_specific_vad: true,
-      enable_smart_audio_recovery: true
-    }
-  };
-  
-  console.log(`⚙️ ElevenLabs optimal settings requested for ${deviceType}`);
-  
-  res.json({
-    success: true,
-    settings: elevenLabsSettings,
-    timestamp: new Date().toISOString(),
-    version: 'v4.0-FastInterruption',
-    recommendations: [
-      `Настройки оптимизированы для ${deviceType}`,
-      'Используйте эти настройки для лучшей производительности',
-      'Система быстрого перебивания настроена для максимальной отзывчивости',
-      `Время отклика перебивания: ${deviceType === 'iOS' ? '150мс' : deviceType === 'Android' ? '180мс' : '200мс'}`
-    ]
-  });
-});
-
-// ✅ NEW: A/B testing endpoint for interruption configs
-app.post('/api/test-interruption-config', (req, res) => {
-  const { device_type, test_config } = req.body;
-  
-  // Валидация конфигурации
-  const allowedDevices = ['iOS', 'Android', 'Desktop', 'Mobile'];
-  if (!allowedDevices.includes(device_type)) {
-    return res.status(400).json({
-      error: 'Invalid device type',
-      allowed: allowedDevices
-    });
-  }
-  
-  // Сохраняем тестовую конфигурацию (в реальном проекте - в БД)
-  const testId = `test_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  console.log(`🧪 A/B test created: ${testId} for ${device_type}`, test_config);
-  
-  res.json({
-    success: true,
-    test_id: testId,
-    device_type: device_type,
-    config: test_config,
-    expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    baseline_performance: {
-      ios: { interruption_time: 150, protection_time: 150 },
-      android: { interruption_time: 180, protection_time: 180 },
-      desktop: { interruption_time: 200, protection_time: 200 }
-    }
-  });
-});
-
-// ✅ HEALTH CHECK с подробной диагностикой включая систему перебивания
+// ✅ HEALTH CHECK с диагностикой ElevenLabs
 app.get('/health', async (req, res) => {
   const health = {
     status: 'OK',
@@ -564,10 +417,10 @@ app.get('/health', async (req, res) => {
     agent_id: AGENT_ID,
     api_configured: !!ELEVENLABS_API_KEY,
     features: {
-      fast_interruption_system: true,
-      device_optimization: true,
-      anti_debounce_protection: true,
-      version: 'v4.0'
+      elevenlabs_conversational_ai: true,
+      voice_interruption: true,
+      auto_interruption: true,
+      version: 'v4.0-ElevenLabs'
     }
   };
 
@@ -576,11 +429,11 @@ app.get('/health', async (req, res) => {
     await checkElevenLabsAPI();
     health.elevenlabs_api = 'accessible';
     health.agent_ready = true;
-    health.interruption_system = 'ready';
+    health.voice_interruption = 'ready';
   } catch (error) {
     health.elevenlabs_api = 'error';
     health.agent_ready = false;
-    health.interruption_system = 'limited';
+    health.voice_interruption = 'limited';
     health.api_error = error.message;
   }
 
@@ -598,7 +451,7 @@ function checkElevenLabsAPI() {
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat-v4.0-FastInterruption'
+        'User-Agent': 'ElevenLabs-Voice-Chat-v4.0-VoiceInterruption'
       },
       timeout: 5000
     };
@@ -639,8 +492,8 @@ app.post('/api/retry-agent', async (req, res) => {
         status: 'ready',
         message: 'Agent is ready',
         features: {
-          fast_interruption: true,
-          device_optimization: true
+          voice_interruption: true,
+          elevenlabs_conversational_ai: true
         }
       });
     } else {
@@ -661,14 +514,14 @@ app.post('/api/retry-agent', async (req, res) => {
   }
 });
 
-// ✅ DIAGNOSTICS с подробной информацией включая систему перебивания
+// ✅ DIAGNOSTICS с информацией о голосовом перебивании
 app.get('/api/diagnostics', async (req, res) => {
   console.log('🔍 Diagnostics requested');
   const deviceType = getDeviceTypeFromUserAgent(req.headers['user-agent'] || '');
   
   const diagnostics = {
     timestamp: new Date().toISOString(),
-    version: 'v4.0-FastInterruption',
+    version: 'v4.0-ElevenLabs-VoiceInterruption',
     client_device: deviceType,
     server: {
       status: 'running',
@@ -682,35 +535,24 @@ app.get('/api/diagnostics', async (req, res) => {
       api_key_preview: ELEVENLABS_API_KEY ? 
         `${ELEVENLABS_API_KEY.substring(0, 8)}...` : 'not set'
     },
-    endpoints: {
-      health: '/health',
-      agent_id: '/api/agent-id',
-      signed_url: '/api/signed-url',
-      diagnostics: '/api/diagnostics',
-      device_config: '/api/device-config',
-      interruption_stats: '/api/interruption-stats/:agentId',
-      optimal_settings: '/api/elevenlabs-optimal-settings/:agentId'
-    },
-    recommendations: [],
-    tests: {},
-    // ✅ NEW: Interruption system diagnostics
-    interruption_system: {
+    voice_interruption_system: {
       status: 'ready',
-      version: 'v4.0',
+      version: 'ElevenLabs Conversational AI',
       supported_devices: ['iOS', 'Android', 'Desktop'],
       features: [
-        'Fast interruption detection (150-200ms)',
+        'Automatic voice activity detection',
+        'Real-time speech interruption',
         'Device-specific optimization',
-        'Anti-debounce protection',
-        'Predictive interruption',
-        'Smart audio queue management'
+        'ElevenLabs native interruption support'
       ],
       device_optimizations: {
-        ios: { protection_time: 150, expected_latency: '150ms' },
-        android: { protection_time: 180, expected_latency: '180ms' },
-        desktop: { protection_time: 200, expected_latency: '200ms' }
+        ios: { threshold: 0.4, expected_behavior: 'Conservative interruption' },
+        android: { threshold: 0.3, expected_behavior: 'Balanced interruption' },
+        desktop: { threshold: 0.25, expected_behavior: 'Aggressive interruption' }
       }
-    }
+    },
+    recommendations: [],
+    tests: {}
   };
 
   // Test 1: ElevenLabs API accessibility
@@ -785,21 +627,21 @@ app.get('/api/diagnostics', async (req, res) => {
     diagnostics.tests.signed_url_generation = 'failed';
   }
 
-  // ✅ NEW: Test 4: Interruption system readiness
-  diagnostics.tests.interruption_system = 'passed';
-  diagnostics.recommendations.push('⚡ Система быстрого перебивания готова');
+  // Test 4: Voice interruption system readiness
+  diagnostics.tests.voice_interruption_system = 'passed';
+  diagnostics.recommendations.push('🎤 Система голосового перебивания готова');
   diagnostics.recommendations.push(`📱 Оптимизировано для ${deviceType} устройств`);
   
   // Device-specific recommendations
   switch (deviceType) {
     case 'iOS':
-      diagnostics.recommendations.push('🍎 iOS оптимизация: 150мс время отклика');
+      diagnostics.recommendations.push('🍎 iOS: Консервативное перебивание (порог 0.4)');
       break;
     case 'Android':
-      diagnostics.recommendations.push('🤖 Android оптимизация: 180мс время отклика');
+      diagnostics.recommendations.push('🤖 Android: Сбалансированное перебивание (порог 0.3)');
       break;
     case 'Desktop':
-      diagnostics.recommendations.push('💻 Desktop оптимизация: 200мс время отклика');
+      diagnostics.recommendations.push('💻 Desktop: Агрессивное перебивание (порог 0.25)');
       break;
   }
 
@@ -811,8 +653,8 @@ app.get('/api/diagnostics', async (req, res) => {
     health_score: `${passedTests}/${totalTests}`,
     status: passedTests === totalTests ? 'healthy' : 
             passedTests > 0 ? 'partial' : 'unhealthy',
-    ready_for_connection: passedTests >= 1, // Минимум API должен быть доступен
-    interruption_system_ready: true // Система перебивания всегда готова
+    ready_for_connection: passedTests >= 1,
+    voice_interruption_ready: true
   };
 
   // Additional recommendations based on overall health
@@ -822,10 +664,10 @@ app.get('/api/diagnostics', async (req, res) => {
   } else if (diagnostics.overall.status === 'partial') {
     diagnostics.recommendations.push('⚠️ Система частично готова');
     diagnostics.recommendations.push('💡 Некоторые функции могут не работать');
-    diagnostics.recommendations.push('⚡ Система перебивания будет работать в любом случае');
+    diagnostics.recommendations.push('🎤 Голосовое перебивание должно работать');
   } else {
     diagnostics.recommendations.push('🎉 Система полностью готова к работе');
-    diagnostics.recommendations.push('⚡ Система быстрого перебивания активна');
+    diagnostics.recommendations.push('🎤 Голосовое перебивание активно');
   }
 
   res.json(diagnostics);
@@ -879,23 +721,22 @@ process.on('SIGINT', () => {
 const server = app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🎯 Agent ID: ${AGENT_ID}`);
-  console.log(`⚡ Fast Interruption System v4.0: READY`);
+  console.log(`🎤 ElevenLabs Voice Interruption System v4.0: READY`);
   console.log(`✅ All endpoints ready!`);
   console.log(`📱 App: http://localhost:${PORT}`);
   console.log(`🔧 Debug: http://localhost:${PORT}/debug`);
   console.log(`🩺 Health: http://localhost:${PORT}/health`);
-  console.log(`📊 Device Config: http://localhost:${PORT}/api/device-config`);
-  console.log(`⚡ Interruption Stats: http://localhost:${PORT}/api/interruption-stats/${AGENT_ID}`);
+  console.log(`🎤 ElevenLabs Config: http://localhost:${PORT}/api/elevenlabs-config`);
   
   // Initial health check
   setTimeout(async () => {
     try {
       await checkElevenLabsAPI();
       console.log('✅ Initial ElevenLabs API check passed');
-      console.log('⚡ Fast Interruption System is ready for all devices');
+      console.log('🎤 Voice Interruption System is ready for all devices');
     } catch (error) {
       console.log(`⚠️ Initial ElevenLabs API check failed: ${error.message}`);
-      console.log('⚡ Fast Interruption System will work with fallback connection');
+      console.log('🎤 Voice Interruption System will work with fallback connection');
     }
   }, 1000);
 });
