@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ElevenLabs AI Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            overflow: hidden;
+        }
+
+        .container {
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border-radius: 30px;
+            padding: 3rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.3);
+        }
+
+        .header {
+            margin-bottom: 2rem;
+        }
+
+        .title {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(45deg, #fff, #a8c8ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            margin-bottom: 1rem;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            transition: all 0.3s ease;
+        }
+
+        .status-badge.disconnected {
+            background: linear-gradient(45deg, #ef4444, #dc2626);
+        }
+
+        .status-badge.connecting {
+            background: linear-gradient(45deg, #f59e0b, #d97706);
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-badge.connected {
+            background: linear-gradient(45deg, #10b981, #059669);
+        }
+
+        .main-button {
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            font-size: 4rem;
+            cursor: pointer;
+            margin: 2rem auto;
+            display: block;
+            transition: all 0.4s ease;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .main-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+        }
+
+        .main-button.listening {
+            background: linear-gradient(135deg, #74b9ff, #0984e3);
+            animation: pulse-listening 2s infinite;
+        }
+
+        .main-button.speaking {
+            background: linear-gradient(135deg, #00b894, #00a085);
+            animation: wave-speaking 0.8s ease-in-out infinite;
+        }
+
+        .main-button.processing {
+            background: linear-gradient(135deg, #fdcb6e, #e17055);
+            animation: spin-processing 1.2s linear infinite;
+        }
+
+        .main-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+        }
+
+        @keyframes pulse-listening {
+            0%, 100% { transform: scale(1); box-shadow: 0 20px 40px rgba(116, 185, 255, 0.4); }
+            50% { transform: scale(1.08); box-shadow: 0 30px 60px rgba(116, 185, 255, 0.6); }
+        }
+
+        @keyframes wave-speaking {
+            0%, 100% { transform: scale(1); }
+            25% { transform: scale(1.05); }
+            75% { transform: scale(0.95); }
+        }
+
+        @keyframes spin-processing {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .status-text {
+            font-size: 1.3rem;
+            margin: 1.5rem 0;
+            min-height: 1.6rem;
+            font-weight: 500;
+        }
+
+        .audio-visualizer {
+            height: 80px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 40px;
+            margin: 2rem 0;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .audio-bars {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            height: 60px;
+        }
+
+        .audio-bar {
+            width: 4px;
+            background: linear-gradient(to top, #74b9ff, #0984e3);
+            border-radius: 2px;
+            transition: height 0.1s ease;
+            min-height: 4px;
+        }
+
+        .vad-indicator {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #64748b;
+            transition: all 0.3s ease;
+        }
+
+        .vad-indicator.active {
+            background: #10b981;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+        }
+
+        .conversation-panel {
+            margin-top: 2rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 20px;
+            padding: 1.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        .conversation-title {
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            opacity: 0.9;
+        }
+
+        .conversation-empty {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.6);
+            font-style: italic;
+            padding: 2rem 0;
+        }
+
+        .message {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            line-height: 1.4;
+        }
+
+        .message.user {
+            background: rgba(116, 185, 255, 0.3);
+            margin-left: 2rem;
+            text-align: right;
+        }
+
+        .message.assistant {
+            background: rgba(0, 184, 148, 0.3);
+            margin-right: 2rem;
+        }
+
+        .message-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            opacity: 0.8;
+            margin-bottom: 0.3rem;
+        }
+
+        .controls {
+            margin: 1.5rem 0;
+            display: flex;
+            gap: 0.8rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .control-btn {
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+            backdrop-filter: blur(10px);
+        }
+
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .control-btn.active {
+            background: #74b9ff;
+            box-shadow: 0 8px 25px rgba(116, 185, 255, 0.4);
+        }
+
+        .stats {
+            margin-top: 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1rem;
+            font-size: 0.85rem;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #74b9ff;
+        }
+
+        .connection-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ef4444;
+            transition: all 0.3s;
+        }
+
+        .connection-indicator.connected {
+            background: #10b981;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+        }
+
+        .error-message {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            color: #fecaca;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 2rem;
+                margin: 1rem;
+            }
+            
+            .main-button {
+                width: 140px;
+                height: 140px;
+                font-size: 3rem;
+            }
+            
+            .title {
+                font-size: 2.2rem;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="connection-indicator" id="connectionIndicator"></div>
+        
+        <div class="header">
+            <h1 class="title">🎤 ElevenLabs AI</h1>
+            <p class="subtitle">Разговорный AI ассистент</p>
+            <div class="status-badge disconnected" id="statusBadge">Не подключен</div>
+        </div>
+
+        <button class="main-button" id="mainButton" disabled>
+            <span id="buttonIcon">📞</span>
+        </button>
+
+        <div class="status-text" id="statusText">Подключение к серверу...</div>
+
+        <div class="audio-visualizer">
+            <div class="audio-bars" id="audioBars">
+                <!-- Будут созданы динамически -->
+            </div>
+            <div class="vad-indicator" id="vadIndicator"></div>
+        </div>
+
+        <div class="controls">
+            <button class="control-btn active" id="autoGainBtn">🎚️ Авто-уровень</button>
+            <button class="control-btn active" id="noiseCancelBtn">🔇 Шумы</button>
+            <button class="control-btn" id="debugBtn">🔍 Debug</button>
+        </div>
+
+        <div class="conversation-panel">
+            <div class="conversation-title">💬 Разговор</div>
+            <div id="conversationContent">
+                <div class="conversation-empty">
+                    Нажмите на кнопку и начните говорить...
+                </div>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="messagesCount">0</div>
+                <div>Сообщений</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="audioChunks">0</div>
+                <div>Аудио чанков</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="vadScore">0%</div>
+                <div>VAD Score</div>
+            </div>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+    </div>
+
+    <script>
+        class ElevenLabsAIClient {
+            constructor() {
+                this.ws = null;
+                this.mediaRecorder = null;
+                this.audioContext = null;
+                this.analyser = null;
+                this.isRecording = false;
+                this.isConnected = false;
+                this.conversationId = null;
+                
+                // Настройки
+                this.settings = {
+                    autoGainControl: true,
+                    noiseSuppression: true,
+                    echoCancellation: true,
+                    sampleRate: 16000,
+                    chunkInterval: 250 // мс
+                };
+                
+                // Статистика
+                this.stats = {
+                    messagesCount: 0,
+                    audioChunks: 0,
+                    vadScore: 0
+                };
+                
+                this.initializeElements();
+                this.createAudioBars();
+                this.connectWebSocket();
+                this.bindEvents();
+            }
+
+            initializeElements() {
+                this.mainButton = document.getElementById('mainButton');
+                this.buttonIcon = document.getElementById('buttonIcon');
+                this.statusText = document.getElementById('statusText');
+                this.statusBadge = document.getElementById('statusBadge');
+                this.connectionIndicator = document.getElementById('connectionIndicator');
+                this.conversationContent = document.getElementById('conversationContent');
+                this.errorMessage = document.getElementById('errorMessage');
+                this.vadIndicator = document.getElementById('vadIndicator');
+                this.audioBars = document.getElementById('audioBars');
+                
+                // Статистика
+                this.messagesCountEl = document.getElementById('messagesCount');
+                this.audioChunksEl = document.getElementById('audioChunks');
+                this.vadScoreEl = document.getElementById('vadScore');
+                
+                // Контролы
+                this.autoGainBtn = document.getElementById('autoGainBtn');
+                this.noiseCancelBtn = document.getElementById('noiseCancelBtn');
+                this.debugBtn = document.getElementById('debugBtn');
+            }
+
+            createAudioBars() {
+                // Создаем аудио-визуализатор
+                for (let i = 0; i < 20; i++) {
+                    const bar = document.createElement('div');
+                    bar.className = 'audio-bar';
+                    bar.style.height = '4px';
+                    this.audioBars.appendChild(bar);
+                }
+            }
+
+            bindEvents() {
+                this.mainButton.addEventListener('click', () => {
+                    if (this.isRecording) {
+                        this.stopRecording();
+                    } else {
+                        this.startRecording();
+                    }
+                });
+
+                // Настройки
+                this.autoGainBtn.addEventListener('click', () => {
+                    this.settings.autoGainControl = !this.settings.autoGainControl;
+                    this.autoGainBtn.classList.toggle('active', this.settings.autoGainControl);
+                    this.autoGainBtn.textContent = `🎚️ Авто-уровень ${this.settings.autoGainControl ? 'ВКЛ' : 'ВЫКЛ'}`;
+                });
+
+                this.noiseCancelBtn.addEventListener('click', () => {
+                    this.settings.noiseSuppression = !this.settings.noiseSuppression;
+                    this.noiseCancelBtn.classList.toggle('active', this.settings.noiseSuppression);
+                    this.noiseCancelBtn.textContent = `🔇 Шумы ${this.settings.noiseSuppression ? 'ВКЛ' : 'ВЫКЛ'}`;
+                });
+
+                this.debugBtn.addEventListener('click', () => {
+                    const isDebug = this.debugBtn.classList.toggle('active');
+                    this.debugBtn.textContent = `🔍 Debug ${isDebug ? 'ВКЛ' : 'ВЫКЛ'}`;
+                });
+
+                // Горячие клавиши
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space' && !this.isRecording && this.isConnected) {
+                        e.preventDefault();
+                        this.startRecording();
+                    }
+                });
+
+                document.addEventListener('keyup', (e) => {
+                    if (e.code === 'Space' && this.isRecording) {
+                        e.preventDefault();
+                        this.stopRecording();
+                    }
+                });
+            }
+
+            connectWebSocket() {
+                try {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
+                    
+                    this.ws = new WebSocket(wsUrl);
+                    
+                    this.ws.onopen = () => {
+                        this.log('🔗 Подключен к серверу');
+                        this.isConnected = true;
+                        this.updateConnectionStatus(true);
+                        this.updateStatus('connected', 'Подключен! Нажмите для начала разговора');
+                        this.mainButton.disabled = false;
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        this.handleServerMessage(data);
+                    };
+                    
+                    this.ws.onclose = () => {
+                        this.log('❌ Соединение с сервером потеряно');
+                        this.isConnected = false;
+                        this.updateConnectionStatus(false);
+                        this.updateStatus('disconnected', 'Соединение потеряно');
+                        this.mainButton.disabled = true;
+                        
+                        // Переподключение через 5 секунд
+                        setTimeout(() => this.connectWebSocket(), 5000);
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        this.log('🚨 Ошибка WebSocket:', error);
+                        this.showError('Ошибка соединения с сервером');
+                    };
+                    
+                } catch (error) {
+                    this.log('❌ Ошибка создания WebSocket:', error);
+                    this.showError('Не удалось подключиться к серверу');
+                }
+            }
+
+            handleServerMessage(data) {
+                const { type } = data;
+                
+                this.log(`📨 Сервер: ${type}`, data);
+                
+                switch (type) {
+                    case 'conversation_ready':
+                        this.conversationId = data.conversation_id;
+                        this.log(`✅ Разговор готов: ${this.conversationId}`);
+                        break;
+                        
+                    case 'user_transcript':
+                        this.addMessage('user', data.text);
+                        this.stats.messagesCount++;
+                        this.updateStats();
+                        break;
+                        
+                    case 'agent_response':
+                        this.addMessage('assistant', data.text);
+                        this.stats.messagesCount++;
+                        this.updateStats();
+                        break;
+                        
+                    case 'audio_response':
+                        this.playAudio(data.audio, data.audio_format);
+                        break;
+                        
+                    case 'vad_score':
+                        this.updateVAD(data.score);
+                        break;
+                        
+                    case 'interruption':
+                        this.statusText.textContent = '⚡ Перебивание обнаружено';
+                        break;
+                        
+                    case 'error':
+                        this.showError(data.message);
+                        break;
+                        
+                    default:
+                        this.log(`❓ Неизвестный тип сообщения: ${type}`);
+                }
+            }
+
+            async startRecording() {
+                try {
+                    this.clearError();
+                    
+                    // Запрашиваем доступ к микрофону
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: this.settings.sampleRate,
+                            channelCount: 1,
+                            echoCancellation: this.settings.echoCancellation,
+                            noiseSuppression: this.settings.noiseSuppression,
+                            autoGainControl: this.settings.autoGainControl
+                        }
+                    });
+
+                    // Создаем аудио контекст для визуализации
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const source = this.audioContext.createMediaStreamSource(stream);
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 256;
+                    source.connect(this.analyser);
+                    
+                    // Запускаем визуализацию
+                    this.startAudioVisualization();
+
+                    // Создаем MediaRecorder
+                    this.mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus',
+                        audioBitsPerSecond: 16000
+                    });
+
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.sendAudioChunk(event.data);
+                        }
+                    };
+
+                    this.mediaRecorder.onstop = () => {
+                        stream.getTracks().forEach(track => track.stop());
+                        this.stopAudioVisualization();
+                    };
+
+                    // Начинаем запись
+                    this.mediaRecorder.start(this.settings.chunkInterval);
+                    this.isRecording = true;
+                    this.updateUI();
+                    this.statusText.textContent = '🎤 Слушаю... Говорите!';
+                    
+                } catch (error) {
+                    this.log('❌ Ошибка доступа к микрофону:', error);
+                    this.showError('Не удалось получить доступ к микрофону');
+                }
+            }
+
+            stopRecording() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                    this.isRecording = false;
+                    this.updateUI();
+                    this.statusText.textContent = '⚙️ Обрабатываю...';
+                }
+            }
+
+            async sendAudioChunk(audioBlob) {
+                try {
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    const audioArray = Array.from(new Uint8Array(arrayBuffer));
+                    
+                    this.ws.send(JSON.stringify({
+                        type: 'audio_chunk',
+                        data: audioArray,
+                        timestamp: Date.now()
+                    }));
+                    
+                    this.stats.audioChunks++;
+                    this.updateStats();
+                    
+                } catch (error) {
+                    this.log('❌ Ошибка отправки аудио:', error);
+                }
+            }
+
+            async playAudio(audioBase64, format) {
+                try {
+                    // Декодируем base64 аудио
+                    const audioData = atob(audioBase64);
+                    const audioArray = new Uint8Array(audioData.length);
+                    for (let i = 0; i < audioData.length; i++) {
+                        audioArray[i] = audioData.charCodeAt(i);
+                    }
+                    
+                    // Воспроизводим через Web Audio API
+                    if (!this.audioContext) {
+                        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+                    
+                    const audioBuffer = await this.audioContext.decodeAudioData(audioArray.buffer);
+                    const source = this.audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(this.audioContext.destination);
+                    
+                    this.updateButtonState('speaking');
+                    this.statusText.textContent = '🔊 AI говорит...';
+                    
+                    source.onended = () => {
+                        this.updateUI();
+                        this.statusText.textContent = 'Готов к разговору';
+                    };
+                    
+                    source.start();
+                    
+                } catch (error) {
+                    this.log('❌ Ошибка воспроизведения аудио:', error);
+                    
+                    // Fallback: простое воспроизведение через Audio элемент
+                    try {
+                        const audioBlob = new Blob([
+                            Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))
+                        ], { type: 'audio/pcm' });
+                        
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        const audio = new Audio(audioUrl);
+                        audio.play();
+                        
+                        audio.onended = () => {
+                            URL.revokeObjectURL(audioUrl);
+                            this.updateUI();
+                        };
+                        
+                    } catch (fallbackError) {
+                        this.log('❌ Fallback аудио тоже не работает:', fallbackError);
+                    }
+                }
+            }
+
+            startAudioVisualization() {
+                if (!this.analyser) return;
+                
+                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                const bars = this.audioBars.children;
+                
+                const animate = () => {
+                    if (!this.isRecording) return;
+                    
+                    this.analyser.getByteFrequencyData(dataArray);
+                    
+                    // Обновляем аудио-бары
+                    for (let i = 0; i < bars.length; i++) {
+                        const barHeight = (dataArray[i * 2] / 255) * 60;
+                        bars[i].style.height = `${Math.max(barHeight, 4)}px`;
+                    }
+                    
+                    requestAnimationFrame(animate);
+                };
+                
+                animate();
+            }
+
+            stopAudioVisualization() {
+                const bars = this.audioBars.children;
+                for (let bar of bars) {
+                    bar.style.height = '4px';
+                }
+            }
+
+            updateVAD(score) {
+                this.stats.vadScore = Math.round(score * 100);
+                this.updateStats();
+                
+                // Обновляем VAD индикатор
+                this.vadIndicator.classList.toggle('active', score > 0.5);
+            }
+
+            addMessage(role, text) {
+                // Удаляем placeholder если есть
+                const empty = this.conversationContent.querySelector('.conversation-empty');
+                if (empty) {
+                    empty.remove();
+                }
+                
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${role}`;
+                
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'message-label';
+                labelDiv.textContent = role === 'user' ? 'Вы:' : 'AI:';
+                
+                const textDiv = document.createElement('div');
+                textDiv.textContent = text;
+                
+                messageDiv.appendChild(labelDiv);
+                messageDiv.appendChild(textDiv);
+                
+                this.conversationContent.appendChild(messageDiv);
+                this.conversationContent.scrollTop = this.conversationContent.scrollHeight;
+            }
+
+            updateUI() {
+                this.updateButtonState();
+            }
+
+            updateButtonState(state = null) {
+                this.mainButton.className = 'main-button';
+                
+                if (state === 'speaking') {
+                    this.mainButton.classList.add('speaking');
+                    this.buttonIcon.textContent = '🔊';
+                } else if (this.isRecording) {
+                    this.mainButton.classList.add('listening');
+                    this.buttonIcon.textContent = '⏹️';
+                } else {
+                    this.buttonIcon.textContent = '🎤';
+                }
+            }
+
+            updateStatus(status, message) {
+                this.statusBadge.className = `status-badge ${status}`;
+                
+                switch (status) {
+                    case 'connected':
+                        this.statusBadge.textContent = 'Подключен';
+                        break;
+                    case 'connecting':
+                        this.statusBadge.textContent = 'Подключение...';
+                        break;
+                    case 'disconnected':
+                        this.statusBadge.textContent = 'Отключен';
+                        break;
+                }
+                
+                if (message) {
+                    this.statusText.textContent = message;
+                }
+            }
+
+            updateConnectionStatus(connected) {
+                this.connectionIndicator.classList.toggle('connected', connected);
+            }
+
+            updateStats() {
+                this.messagesCountEl.textContent = this.stats.messagesCount;
+                this.audioChunksEl.textContent = this.stats.audioChunks;
+                this.vadScoreEl.textContent = `${this.stats.vadScore}%`;
+            }
+
+            showError(message) {
+                this.log(`🚨 Ошибка: ${message}`);
+                this.errorMessage.textContent = message;
+                this.errorMessage.style.display = 'block';
+                
+                setTimeout(() => {
+                    this.errorMessage.style.display = 'none';
+                }, 5000);
+            }
+
+            clearError() {
+                this.errorMessage.style.display = 'none';
+            }
+
+            log(...args) {
+                console.log('[ElevenLabsAI]', ...args);
+                
+                // Если включен debug режим, можно добавить визуальные логи
+                if (this.debugBtn?.classList.contains('active')) {
+                    // TODO: Добавить визуальные логи в интерфейс
+                }
+            }
+        }
+
+        // Запуск приложения
+        document.addEventListener('DOMContentLoaded', () => {
+            window.elevenLabsClient = new ElevenLabsAIClient();
+        });
+    </script>
+</body>
+</html>
