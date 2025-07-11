@@ -51,8 +51,17 @@ ASSISTANT_CONFIG = {
     }
 }
 
-# Инициализация OpenAI клиента
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+# Инициализация OpenAI клиента с обработкой ошибок
+try:
+    openai_client = OpenAI(
+        api_key=OPENAI_API_KEY,
+        timeout=30.0,
+        max_retries=2
+    )
+    logger.info("OpenAI client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize OpenAI client: {e}")
+    openai_client = None
 
 app = FastAPI(title="ElevenLabs Voice Assistant MVP")
 
@@ -98,6 +107,10 @@ class VoiceAssistantHandler:
     async def generate_response(self, user_text):
         """Генерация ответа через OpenAI GPT"""
         try:
+            # Проверяем доступность OpenAI клиента
+            if not openai_client:
+                return "Извините, сервис временно недоступен. Попробуйте позже."
+            
             # Добавляем сообщение пользователя в историю
             self.conversation_history.append({
                 "role": "user",
