@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ElevenLabs Voice Chat - ИИ Помощник</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        .header {
+            margin-bottom: 2rem;
+        }
+
+        .title {
+            font-size: 2rem;
+            font-weight: bold;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .status {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 10px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .status.disconnected {
+            background: #fee;
+            color: #c53030;
+            border-left: 4px solid #c53030;
+        }
+
+        .status.connecting {
+            background: #fef5e7;
+            color: #d69e2e;
+            border-left: 4px solid #d69e2e;
+        }
+
+        .status.connected {
+            background: #f0fff4;
+            color: #38a169;
+            border-left: 4px solid #38a169;
+        }
+
+        .status.speaking {
+            background: #ebf8ff;
+            color: #3182ce;
+            border-left: 4px solid #3182ce;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .controls {
+            margin: 2rem 0;
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+            color: white;
+        }
+
+        .btn-recording {
+            background: linear-gradient(45deg, #ff4757, #ff3742);
+            color: white;
+            animation: recording-pulse 1s infinite;
+        }
+
+        @keyframes recording-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
+            50% { box-shadow: 0 0 0 10px rgba(255, 71, 87, 0); }
+        }
+
+        .chat-area {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            min-height: 200px;
+            max-height: 300px;
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        .message {
+            margin: 0.5rem 0;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+
+        .message.user {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .message.assistant {
+            background: #e9ecef;
+            color: #333;
+            border-left: 3px solid #667eea;
+        }
+
+        .message.system {
+            background: #fff3cd;
+            color: #856404;
+            text-align: center;
+            margin: 0 auto;
+            font-style: italic;
+        }
+
+        .mic-animation {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            margin: 1rem auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 2rem;
+            transition: all 0.3s ease;
+        }
+
+        .mic-animation.recording {
+            animation: mic-recording 1.5s infinite;
+            background: linear-gradient(45deg, #ff4757, #ff3742);
+        }
+
+        @keyframes mic-recording {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .volume-indicator {
+            width: 100%;
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+            margin: 1rem 0;
+            overflow: hidden;
+        }
+
+        .volume-bar {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border-radius: 2px;
+            transition: width 0.1s ease;
+            width: 0%;
+        }
+
+        .footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e9ecef;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                margin: 1rem;
+                padding: 1.5rem;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">🎤 ИИ Голосовой Помощник</h1>
+            <p class="subtitle">Powered by ElevenLabs Conversational AI</p>
+        </div>
+
+        <div id="status" class="status disconnected">
+            🔴 Отключен
+        </div>
+
+        <div class="controls">
+            <button id="connectBtn" class="btn btn-primary">
+                🔗 Подключиться
+            </button>
+            <button id="disconnectBtn" class="btn btn-danger" disabled>
+                ⛔ Отключиться
+            </button>
+        </div>
+
+        <div class="mic-animation" id="micAnimation">
+            🎤
+        </div>
+
+        <div class="volume-indicator">
+            <div class="volume-bar" id="volumeBar"></div>
+        </div>
+
+        <div class="chat-area" id="chatArea">
+            <div class="message system">
+                Нажмите "Подключиться" чтобы начать разговор с ИИ помощником
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>🎯 Говорите естественно • 🎧 Используйте наушники для лучшего качества</p>
+            <p>Agent ID: <span id="agentId">Загрузка...</span></p>
+        </div>
+    </div>
+
+    <script>
+        class VoiceChat {
+            constructor() {
+                this.ws = null;
+                this.isConnected = false;
+                this.mediaRecorder = null;
+                this.audioStream = null;
+                this.audioContext = null;
+                this.agentId = null;
+                this.apiKey = null;
+                
+                this.initializeElements();
+                this.loadAgentConfig();
+            }
+
+            initializeElements() {
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.status = document.getElementById('status');
+                this.chatArea = document.getElementById('chatArea');
+                this.micAnimation = document.getElementById('micAnimation');
+                this.volumeBar = document.getElementById('volumeBar');
+                this.agentIdSpan = document.getElementById('agentId');
+
+                this.connectBtn.addEventListener('click', () => this.connect());
+                this.disconnectBtn.addEventListener('click', () => this.disconnect());
+            }
+
+            async loadAgentConfig() {
+                try {
+                    const response = await fetch('/api/agent-id');
+                    const data = await response.json();
+                    
+                    if (data.agent_id) {
+                        this.agentId = data.agent_id;
+                        this.apiKey = data.api_key;
+                        this.agentIdSpan.textContent = this.agentId.substring(0, 12) + '...';
+                        this.addMessage('system', `✅ Агент готов (ID: ${this.agentId.substring(0, 8)}...)`);
+                    } else {
+                        throw new Error('Agent not ready');
+                    }
+                } catch (error) {
+                    console.error('Failed to load agent config:', error);
+                    this.addMessage('system', '❌ Ошибка загрузки конфигурации агента');
+                    this.agentIdSpan.textContent = 'Ошибка';
+                }
+            }
+
+            async connect() {
+                if (!this.agentId) {
+                    this.addMessage('system', '❌ Агент еще не готов, попробуйте позже');
+                    return;
+                }
+
+                try {
+                    this.updateStatus('connecting', '🟡 Подключение...');
+                    
+                    // Request microphone access
+                    this.audioStream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        } 
+                    });
+
+                    // Initialize WebSocket
+                    const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
+                    this.ws = new WebSocket(wsUrl);
+
+                    this.ws.onopen = () => this.onWebSocketOpen();
+                    this.ws.onmessage = (event) => this.onWebSocketMessage(event);
+                    this.ws.onclose = () => this.onWebSocketClose();
+                    this.ws.onerror = (error) => this.onWebSocketError(error);
+
+                } catch (error) {
+                    console.error('Connection failed:', error);
+                    this.addMessage('system', '❌ Ошибка подключения: ' + error.message);
+                    this.updateStatus('disconnected', '🔴 Отключен');
+                }
+            }
+
+            onWebSocketOpen() {
+                console.log('WebSocket connected');
+                this.isConnected = true;
+                this.updateStatus('connected', '🟢 Подключен');
+                this.addMessage('system', '🎉 Подключение установлено! Начинайте говорить...');
+                
+                this.connectBtn.disabled = true;
+                this.disconnectBtn.disabled = false;
+
+                // Start audio recording
+                this.startAudioRecording();
+            }
+
+            onWebSocketMessage(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Received:', data);
+
+                    switch (data.type) {
+                        case 'conversation_initiation_metadata':
+                            this.handleInitiation(data);
+                            break;
+                        case 'user_transcript':
+                            this.handleUserTranscript(data);
+                            break;
+                        case 'agent_response':
+                            this.handleAgentResponse(data);
+                            break;
+                        case 'audio':
+                            this.handleAudioResponse(data);
+                            break;
+                        case 'internal_tentative_agent_response':
+                            this.handleTentativeResponse(data);
+                            break;
+                        default:
+                            console.log('Unknown message type:', data.type);
+                    }
+                } catch (error) {
+                    console.error('Error parsing WebSocket message:', error);
+                }
+            }
+
+            onWebSocketClose() {
+                console.log('WebSocket disconnected');
+                this.isConnected = false;
+                this.updateStatus('disconnected', '🔴 Отключен');
+                this.addMessage('system', '🔌 Соединение закрыто');
+                
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
+                this.micAnimation.classList.remove('recording');
+
+                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                    this.mediaRecorder.stop();
+                }
+            }
+
+            onWebSocketError(error) {
+                console.error('WebSocket error:', error);
+                this.addMessage('system', '❌ Ошибка соединения');
+            }
+
+            handleInitiation(data) {
+                const metadata = data.conversation_initiation_metadata_event;
+                console.log('Conversation initiated:', metadata);
+                this.addMessage('system', `💬 Разговор начат (ID: ${metadata.conversation_id.substring(0, 8)}...)`);
+            }
+
+            handleUserTranscript(data) {
+                const transcript = data.user_transcription_event.user_transcript;
+                if (transcript.trim()) {
+                    this.addMessage('user', transcript);
+                }
+            }
+
+            handleAgentResponse(data) {
+                const response = data.agent_response_event.agent_response;
+                this.addMessage('assistant', response);
+                this.updateStatus('speaking', '🎯 ИИ говорит...');
+            }
+
+            handleTentativeResponse(data) {
+                // Optional: show thinking indicator
+                console.log('Agent thinking:', data.tentative_agent_response_internal_event.tentative_agent_response);
+            }
+
+            handleAudioResponse(data) {
+                try {
+                    const audioBase64 = data.audio_event.audio_base_64;
+                    const audioData = atob(audioBase64);
+                    const audioArray = new Uint8Array(audioData.length);
+                    
+                    for (let i = 0; i < audioData.length; i++) {
+                        audioArray[i] = audioData.charCodeAt(i);
+                    }
+
+                    // Create and play audio
+                    const audioBlob = new Blob([audioArray], { type: 'audio/pcm' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        this.updateStatus('connected', '🟢 Слушаю...');
+                    };
+                    
+                    audio.play().catch(error => {
+                        console.error('Audio playback failed:', error);
+                    });
+
+                } catch (error) {
+                    console.error('Error playing audio:', error);
+                }
+            }
+
+            startAudioRecording() {
+                if (!this.audioStream) return;
+
+                this.mediaRecorder = new MediaRecorder(this.audioStream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
+
+                this.mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        // Convert to base64 and send
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                            const base64 = reader.result.split(',')[1];
+                            this.ws.send(JSON.stringify({
+                                user_audio_chunk: base64
+                            }));
+                        };
+                        reader.readAsDataURL(event.data);
+                    }
+                };
+
+                this.mediaRecorder.start(250); // Send chunks every 250ms
+                this.micAnimation.classList.add('recording');
+                
+                // Add volume visualization
+                this.setupVolumeVisualization();
+            }
+
+            setupVolumeVisualization() {
+                if (!this.audioStream) return;
+
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const analyser = this.audioContext.createAnalyser();
+                const source = this.audioContext.createMediaStreamSource(this.audioStream);
+                
+                source.connect(analyser);
+                analyser.fftSize = 256;
+                
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                const updateVolume = () => {
+                    if (!this.isConnected) return;
+                    
+                    analyser.getByteFrequencyData(dataArray);
+                    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                    const percentage = Math.min(100, (average / 128) * 100);
+                    
+                    this.volumeBar.style.width = percentage + '%';
+                    requestAnimationFrame(updateVolume);
+                };
+                
+                updateVolume();
+            }
+
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                }
+                
+                if (this.audioStream) {
+                    this.audioStream.getTracks().forEach(track => track.stop());
+                    this.audioStream = null;
+                }
+
+                if (this.audioContext) {
+                    this.audioContext.close();
+                    this.audioContext = null;
+                }
+
+                this.isConnected = false;
+                this.micAnimation.classList.remove('recording');
+                this.volumeBar.style.width = '0%';
+            }
+
+            updateStatus(className, text) {
+                this.status.className = `status ${className}`;
+                this.status.textContent = text;
+            }
+
+            addMessage(type, content) {
+                const message = document.createElement('div');
+                message.className = `message ${type}`;
+                message.textContent = content;
+                
+                this.chatArea.appendChild(message);
+                this.chatArea.scrollTop = this.chatArea.scrollHeight;
+            }
+        }
+
+        // Initialize app when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new VoiceChat();
+        });
+    </script>
+</body>
+</html>
