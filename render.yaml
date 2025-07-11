@@ -1,0 +1,22 @@
+# render.yaml - конфигурация для автоматического деплоя на Render
+services:
+  - type: web
+    name: elevenlabs-voice-assistant
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m uvicorn app:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /
+    envVars:
+      - key: ELEVENLABS_API_KEY
+        sync: false  # Установите через Render Dashboard
+      - key: OPENAI_API_KEY
+        sync: false  # Установите через Render Dashboard
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: PORT
+        value: "8000"
+    disk:
+      name: tmp
+      mountPath: /tmp
+      sizeGB: 1
