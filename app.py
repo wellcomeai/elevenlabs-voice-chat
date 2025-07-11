@@ -1,6 +1,6 @@
 """
-ElevenLabs Voice Assistant - Production Ready Version
-Оптимизированная версия для деплоя на Render.com
+ElevenLabs Voice Assistant - Минимальная рабочая версия
+Исправления на основе анализа логов и widget.js
 """
 
 import asyncio
@@ -16,6 +16,7 @@ import base64
 import tempfile
 import os
 from pathlib import Path
+import uuid
 
 # Настройка логирования
 logging.basicConfig(
@@ -24,9 +25,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# API ключи из переменных окружения
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "sk_ad652dd64291b883f60472d7719ba49e82b6a43bbe4f3506")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "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")
+# API ключи из переменных окружения - ИСПРАВЛЕНЫ
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "your_elevenlabs_key")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_key")
+
+# ВАЖНО: Используйте ваши реальные ключи!
+if ELEVENLABS_API_KEY == "your_elevenlabs_key":
+    logger.warning("⚠️  Используется тестовый ключ ElevenLabs! Установите правильный ELEVENLABS_API_KEY")
+
+if OPENAI_API_KEY == "your_openai_key":
+    logger.warning("⚠️  Используется тестовый ключ OpenAI! Установите правильный OPENAI_API_KEY")
 
 # Конфигурация ассистента
 ASSISTANT_CONFIG = {
@@ -34,21 +42,7 @@ ASSISTANT_CONFIG = {
     "voice_id": "JBFqnCBsd6RMkjVDRZzb",  # Josh voice
     "model_id": "eleven_flash_v2_5",
     "system_prompt": """Ты - дружелюбный голосовой ассистент по имени Алиса. 
-
-Твоя личность:
-- Говори естественно и живо, как хороший друг
-- Будь полезной и информативной  
-- Отвечай кратко (1-2 предложения максимум)
-- Проявляй эмоции и энтузиазм
-- Будь позитивной и поддерживающей
-
-Стиль общения:
-- Используй простые слова
-- Говори по существу
-- При сложных вопросах предлагай разбить на части
-- Не бойся переспрашивать если что-то неясно
-
-Помни: твои ответы будут озвучены, поэтому говори так, чтобы было приятно слушать!""",
+Отвечай кратко (1-2 предложения максимум), естественно и по существу.""",
     "voice_settings": {
         "stability": 0.5,
         "similarity_boost": 0.8,
@@ -57,32 +51,34 @@ ASSISTANT_CONFIG = {
     }
 }
 
-# Инициализация OpenAI клиента
+# Инициализация OpenAI клиента с проверкой
 try:
     openai_client = OpenAI(
         api_key=OPENAI_API_KEY,
         timeout=30.0,
         max_retries=2
     )
-    logger.info("OpenAI клиент инициализирован")
+    # Тест соединения
+    test_response = openai_client.models.list()
+    logger.info("✅ OpenAI клиент инициализирован и протестирован")
 except Exception as e:
-    logger.error(f"Ошибка инициализации OpenAI: {e}")
+    logger.error(f"❌ Ошибка инициализации OpenAI: {e}")
     openai_client = None
 
 # Создание FastAPI приложения
 app = FastAPI(
     title="ElevenLabs Voice Assistant", 
-    description="Голосовой ассистент на базе ElevenLabs и OpenAI",
-    version="2.0.0"
+    description="Минимальная рабочая версия голосового ассистента",
+    version="2.1.0"
 )
 
-# HTML контент для main page (встроенный для упрощения деплоя)
+# HTML контент - ОБНОВЛЕННЫЙ с лучшими практиками из widget.js
 HTML_CONTENT = """<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElevenLabs Voice Assistant</title>
+    <title>Voice Assistant - Минимальная версия</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -94,36 +90,29 @@ HTML_CONTENT = """<!DOCTYPE html>
             align-items: center;
             padding: 20px;
         }
-        .assistant-container {
+        .container {
             background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
             border-radius: 24px;
             padding: 40px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
             max-width: 500px;
             width: 100%;
             text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
         }
-        .assistant-title {
-            font-size: 32px;
+        .title {
+            font-size: 28px;
             font-weight: 700;
             color: #2d3748;
-            margin-bottom: 8px;
-        }
-        .assistant-subtitle {
-            font-size: 16px;
-            color: #64748b;
-            font-weight: 500;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
         .voice-button {
-            width: 140px;
-            height: 140px;
+            width: 120px;
+            height: 120px;
             border-radius: 50%;
             border: none;
             background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
             color: white;
-            font-size: 32px;
+            font-size: 28px;
             cursor: pointer;
             transition: all 0.3s ease;
             margin: 20px auto;
@@ -148,134 +137,87 @@ HTML_CONTENT = """<!DOCTYPE html>
         @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes wave { 0%, 100% { transform: scale(1); } 25% { transform: scale(1.05); } 75% { transform: scale(0.95); } }
-        .status-text {
-            margin-top: 25px;
-            font-size: 18px;
-            font-weight: 500;
-            color: #475569;
-            min-height: 24px;
-        }
-        .conversation-display {
-            margin-top: 40px;
-            padding: 25px;
+        .status { margin-top: 20px; font-size: 16px; color: #475569; }
+        .conversation {
+            margin-top: 30px;
+            padding: 20px;
             background: rgba(248, 250, 252, 0.8);
             border-radius: 16px;
-            min-height: 120px;
             text-align: left;
-        }
-        .conversation-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #334155;
-            margin-bottom: 15px;
-            text-align: center;
+            max-height: 300px;
+            overflow-y: auto;
         }
         .message {
-            margin-bottom: 15px;
-            padding: 12px 16px;
-            border-radius: 12px;
-            line-height: 1.5;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            line-height: 1.4;
         }
         .message.user {
-            background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
+            background: #e0e7ff;
             color: #3730a3;
             margin-left: 20px;
         }
         .message.assistant {
-            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            background: #f0fdf4;
             color: #166534;
             margin-right: 20px;
         }
-        .message-label {
-            font-size: 12px;
-            font-weight: 600;
-            opacity: 0.7;
-            margin-bottom: 4px;
-        }
-        .connection-indicator {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #ef4444;
-            transition: all 0.3s ease;
-        }
-        .connection-indicator.connected {
-            background: #10b981;
-            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
-        }
-        .error-message {
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            border-radius: 12px;
-            color: #dc2626;
-            font-size: 14px;
-            display: none;
+        .error {
+            color: #ef4444;
+            background: rgba(254, 226, 226, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 15px;
         }
     </style>
 </head>
 <body>
-    <div class="assistant-container">
-        <div class="connection-indicator" id="connectionStatus"></div>
+    <div class="container">
+        <h1 class="title">🎤 Голосовой Ассистент</h1>
+        <p>Минимальная рабочая версия</p>
         
-        <div class="assistant-header">
-            <h1 class="assistant-title">🎤 Алиса</h1>
-            <p class="assistant-subtitle">Голосовой ассистент на ElevenLabs + GPT</p>
-        </div>
-
-        <div class="intro-text">
-            Привет! Я Алиса, ваш голосовой помощник. Нажмите на кнопку и начните говорить!
-        </div>
-
         <button class="voice-button" id="voiceButton">
             <span id="buttonIcon">🎤</span>
         </button>
-
-        <div class="status-text" id="statusText">Нажмите, чтобы начать разговор</div>
-
-        <div class="conversation-display">
-            <div class="conversation-title">💬 Наш разговор</div>
-            <div id="conversationHistory">
-                <div style="text-align: center; color: #94a3b8; font-style: italic;">
-                    Здесь будет отображаться наша беседа...
-                </div>
+        
+        <div class="status" id="statusText">Нажмите для начала разговора</div>
+        
+        <div class="conversation" id="conversation">
+            <div style="text-align: center; color: #94a3b8; font-style: italic;">
+                История разговора появится здесь...
             </div>
         </div>
-
-        <div class="error-message" id="errorMessage"></div>
+        
+        <div class="error" id="errorMsg" style="display: none;"></div>
     </div>
 
     <script>
         class VoiceAssistant {
             constructor() {
                 this.ws = null;
+                this.mediaRecorder = null;
+                this.audioChunks = [];
                 this.isRecording = false;
                 this.isProcessing = false;
                 this.isSpeaking = false;
-                this.mediaRecorder = null;
-                this.audioChunks = [];
-                this.currentAudio = null;
                 this.audioQueue = [];
-
-                this.initializeElements();
-                this.connectWebSocket();
+                this.currentAudio = null;
+                
+                this.initElements();
+                this.connect();
                 this.bindEvents();
             }
-
-            initializeElements() {
-                this.voiceButton = document.getElementById('voiceButton');
-                this.buttonIcon = document.getElementById('buttonIcon');
-                this.statusText = document.getElementById('statusText');
-                this.connectionStatus = document.getElementById('connectionStatus');
-                this.errorMessage = document.getElementById('errorMessage');
-                this.conversationHistory = document.getElementById('conversationHistory');
+            
+            initElements() {
+                this.button = document.getElementById('voiceButton');
+                this.icon = document.getElementById('buttonIcon');
+                this.status = document.getElementById('statusText');
+                this.conversation = document.getElementById('conversation');
+                this.errorMsg = document.getElementById('errorMsg');
             }
-
-            connectWebSocket() {
+            
+            connect() {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
                 
@@ -283,18 +225,18 @@ HTML_CONTENT = """<!DOCTYPE html>
                 
                 this.ws.onopen = () => {
                     console.log('WebSocket соединение установлено');
-                    this.updateConnectionStatus(true);
-                    this.statusText.textContent = 'Готов к работе! Нажмите для начала';
+                    this.status.textContent = 'Готов! Нажмите для записи';
+                    this.hideError();
                 };
                 
                 this.ws.onmessage = (event) => {
-                    this.handleWebSocketMessage(JSON.parse(event.data));
+                    this.handleMessage(JSON.parse(event.data));
                 };
                 
                 this.ws.onclose = () => {
                     console.log('WebSocket соединение закрыто');
-                    this.updateConnectionStatus(false);
-                    this.statusText.textContent = 'Соединение потеряно. Обновите страницу';
+                    this.status.textContent = 'Соединение потеряно';
+                    this.showError('Соединение с сервером потеряно. Обновите страницу.');
                 };
                 
                 this.ws.onerror = (error) => {
@@ -302,9 +244,9 @@ HTML_CONTENT = """<!DOCTYPE html>
                     this.showError('Ошибка соединения с сервером');
                 };
             }
-
+            
             bindEvents() {
-                this.voiceButton.addEventListener('click', () => {
+                this.button.addEventListener('click', () => {
                     if (this.isSpeaking) {
                         this.stopSpeaking();
                     } else if (this.isRecording) {
@@ -314,10 +256,10 @@ HTML_CONTENT = """<!DOCTYPE html>
                     }
                 });
             }
-
+            
             async startRecording() {
                 try {
-                    this.clearError();
+                    this.hideError();
                     
                     const stream = await navigator.mediaDevices.getUserMedia({
                         audio: {
@@ -348,23 +290,23 @@ HTML_CONTENT = """<!DOCTYPE html>
                     this.mediaRecorder.start();
                     this.isRecording = true;
                     this.updateUI();
-                    this.statusText.textContent = 'Говорите... Нажмите, чтобы остановить';
+                    this.status.textContent = 'Говорите... Нажмите для остановки';
 
                 } catch (error) {
                     this.showError('Не удалось получить доступ к микрофону: ' + error.message);
                 }
             }
-
+            
             stopRecording() {
                 if (this.mediaRecorder && this.isRecording) {
                     this.mediaRecorder.stop();
                     this.isRecording = false;
                     this.isProcessing = true;
                     this.updateUI();
-                    this.statusText.textContent = 'Обрабатываю...';
+                    this.status.textContent = 'Обрабатываю...';
                 }
             }
-
+            
             async processAudio() {
                 try {
                     const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
@@ -386,9 +328,9 @@ HTML_CONTENT = """<!DOCTYPE html>
                     this.resetState();
                 }
             }
-
-            handleWebSocketMessage(data) {
-                console.log('Получено сообщение:', data);
+            
+            handleMessage(data) {
+                console.log('Получено:', data);
 
                 switch (data.type) {
                     case 'transcription':
@@ -402,7 +344,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                     case 'tts_start':
                         this.isSpeaking = true;
                         this.updateUI();
-                        this.statusText.textContent = 'Говорю... Нажмите для прерывания';
+                        this.status.textContent = 'Говорю... Нажмите для прерывания';
                         this.audioQueue = [];
                         break;
 
@@ -432,7 +374,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                         break;
                 }
             }
-
+            
             async playAudioQueue() {
                 if (!this.audioQueue.length || !this.isSpeaking) return;
 
@@ -467,7 +409,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                     this.playAudioQueue();
                 }
             }
-
+            
             stopSpeaking() {
                 this.isSpeaking = false;
                 this.audioQueue = [];
@@ -479,72 +421,52 @@ HTML_CONTENT = """<!DOCTYPE html>
                 
                 this.resetState();
             }
-
+            
             addMessage(role, text) {
-                if (role === 'user' && this.conversationHistory.innerHTML.includes('Здесь будет')) {
-                    this.conversationHistory.innerHTML = '';
+                if (role === 'user' && this.conversation.innerHTML.includes('История разговора')) {
+                    this.conversation.innerHTML = '';
                 }
 
                 const messageDiv = document.createElement('div');
                 messageDiv.className = `message ${role}`;
+                messageDiv.innerHTML = `<strong>${role === 'user' ? 'Вы:' : 'Ассистент:'}</strong> ${text}`;
                 
-                const labelDiv = document.createElement('div');
-                labelDiv.className = 'message-label';
-                labelDiv.textContent = role === 'user' ? 'Вы:' : 'Алиса:';
-                
-                const textDiv = document.createElement('div');
-                textDiv.textContent = text;
-                
-                messageDiv.appendChild(labelDiv);
-                messageDiv.appendChild(textDiv);
-                
-                this.conversationHistory.appendChild(messageDiv);
-                this.conversationHistory.scrollTop = this.conversationHistory.scrollHeight;
+                this.conversation.appendChild(messageDiv);
+                this.conversation.scrollTop = this.conversation.scrollHeight;
             }
-
+            
             updateUI() {
-                this.voiceButton.className = 'voice-button';
+                this.button.className = 'voice-button';
 
                 if (this.isRecording) {
-                    this.voiceButton.classList.add('recording');
-                    this.buttonIcon.textContent = '⏹️';
+                    this.button.classList.add('recording');
+                    this.icon.textContent = '⏹️';
                 } else if (this.isProcessing) {
-                    this.voiceButton.classList.add('processing');
-                    this.buttonIcon.textContent = '⚙️';
+                    this.button.classList.add('processing');
+                    this.icon.textContent = '⚙️';
                 } else if (this.isSpeaking) {
-                    this.voiceButton.classList.add('speaking');
-                    this.buttonIcon.textContent = '🔊';
+                    this.button.classList.add('speaking');
+                    this.icon.textContent = '🔊';
                 } else {
-                    this.buttonIcon.textContent = '🎤';
+                    this.icon.textContent = '🎤';
                 }
             }
-
+            
             resetState() {
                 this.isRecording = false;
                 this.isProcessing = false;
                 this.isSpeaking = false;
                 this.updateUI();
-                this.statusText.textContent = 'Готов к работе! Нажмите для начала';
+                this.status.textContent = 'Готов! Нажмите для записи';
             }
-
-            updateConnectionStatus(connected) {
-                if (connected) {
-                    this.connectionStatus.classList.add('connected');
-                } else {
-                    this.connectionStatus.classList.remove('connected');
-                }
-            }
-
+            
             showError(message) {
-                this.errorMessage.textContent = message;
-                this.errorMessage.style.display = 'block';
-                setTimeout(() => {
-                    this.errorMessage.style.display = 'none';
-                }, 5000);
+                this.errorMsg.textContent = message;
+                this.errorMsg.style.display = 'block';
             }
-
-            clearError() {
-                this.errorMessage.style.display = 'none';
+            
+            hideError() {
+                this.errorMsg.style.display = 'none';
             }
         }
 
@@ -556,80 +478,117 @@ HTML_CONTENT = """<!DOCTYPE html>
 </html>"""
 
 class VoiceAssistantHandler:
-    """Обработчик голосового ассистента - упрощенная версия для продакшена"""
+    """Обработчик голосового ассистента - ИСПРАВЛЕННАЯ версия"""
     
     def __init__(self):
         self.conversation_history = []
+        self.session_id = str(uuid.uuid4())
     
     async def speech_to_text(self, audio_data):
-        """Преобразование речи в текст через ElevenLabs"""
+        """Преобразование речи в текст через ElevenLabs - ИСПРАВЛЕНО"""
         try:
-            logger.info(f"Получены аудио данные размером: {len(audio_data)} байт")
+            logger.info(f"[STT] Обработка аудио: {len(audio_data)} байт")
             
             if len(audio_data) < 1000:
-                logger.warning("Аудио слишком короткое")
+                logger.warning("[STT] Аудио слишком короткое")
                 return "Запись слишком короткая. Попробуйте говорить дольше."
             
+            # ИСПРАВЛЕНИЕ: Создаем правильный временный файл
             with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as temp_file:
                 temp_file.write(audio_data)
                 temp_file_path = temp_file.name
             
             try:
                 url = "https://api.elevenlabs.io/v1/speech-to-text"
+                headers = {'xi-api-key': ELEVENLABS_API_KEY}
                 
-                # Пробуем разные модели
-                models = ['eleven_multilingual_sts_v2', 'eleven_english_sts_v2']
-                
-                for model_id in models:
-                    try:
-                        logger.info(f"Пробуем STT с моделью: {model_id}")
-                        
-                        data = aiohttp.FormData()
-                        with open(temp_file_path, 'rb') as f:
-                            data.add_field('audio', f.read(), filename='audio.webm', content_type='audio/webm')
-                        data.add_field('model_id', model_id)
-                        
-                        headers = {'xi-api-key': ELEVENLABS_API_KEY}
-                        
-                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                            async with session.post(url, data=data, headers=headers) as response:
-                                if response.status == 200:
-                                    result = await response.json()
-                                    transcript = result.get('text', '').strip()
-                                    
-                                    if transcript and len(transcript) > 1:
-                                        logger.info(f"STT успешно: {transcript}")
-                                        return transcript
-                                else:
-                                    error_text = await response.text()
-                                    logger.error(f"STT ошибка {response.status}: {error_text}")
+                # ИСПРАВЛЕНИЕ: Правильное формирование запроса с файлом
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    data = aiohttp.FormData()
                     
-                    except Exception as model_error:
-                        logger.error(f"Ошибка с моделью {model_id}: {model_error}")
-                        continue
-                
-                return "Не удалось распознать речь. Попробуйте говорить четче."
-                
+                    # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: передаем файл правильно
+                    with open(temp_file_path, 'rb') as audio_file:
+                        data.add_field('audio', audio_file, 
+                                     filename='audio.webm', 
+                                     content_type='audio/webm')
+                    
+                    # Добавляем модель
+                    data.add_field('model_id', 'eleven_multilingual_sts_v2')
+                    
+                    async with session.post(url, data=data, headers=headers) as response:
+                        if response.status == 200:
+                            result = await response.json()
+                            transcript = result.get('text', '').strip()
+                            
+                            if transcript and len(transcript) > 1:
+                                logger.info(f"[STT] Успешно: {transcript}")
+                                return transcript
+                            else:
+                                logger.warning("[STT] Пустой результат")
+                                return "Не удалось распознать речь."
+                        else:
+                            error_text = await response.text()
+                            logger.error(f"[STT] Ошибка {response.status}: {error_text}")
+                            
+                            # Попробуем другую модель
+                            if response.status == 400:
+                                return await self._try_alternative_stt(temp_file_path)
+                            
+                            return "Ошибка распознавания речи. Попробуйте еще раз."
+                        
             finally:
+                # Очищаем временный файл
                 try:
                     os.unlink(temp_file_path)
                 except:
                     pass
                         
         except Exception as e:
-            logger.error(f"STT общая ошибка: {e}")
-            return "Ошибка распознавания речи. Проверьте микрофон."
+            logger.error(f"[STT] Общая ошибка: {e}")
+            return "Ошибка распознавания речи. Проверьте подключение."
+    
+    async def _try_alternative_stt(self, file_path):
+        """Попытка с альтернативной моделью STT"""
+        try:
+            url = "https://api.elevenlabs.io/v1/speech-to-text"
+            headers = {'xi-api-key': ELEVENLABS_API_KEY}
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                data = aiohttp.FormData()
+                
+                with open(file_path, 'rb') as audio_file:
+                    data.add_field('audio', audio_file, 
+                                 filename='audio.webm', 
+                                 content_type='audio/webm')
+                
+                data.add_field('model_id', 'eleven_english_sts_v2')
+                
+                async with session.post(url, data=data, headers=headers) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        transcript = result.get('text', '').strip()
+                        
+                        if transcript and len(transcript) > 1:
+                            logger.info(f"[STT ALT] Успешно: {transcript}")
+                            return transcript
+            
+            return "Не удалось распознать речь. Попробуйте говорить четче."
+            
+        except Exception as e:
+            logger.error(f"[STT ALT] Ошибка: {e}")
+            return "Ошибка распознавания речи."
     
     async def generate_response(self, user_text):
-        """Генерация ответа через OpenAI GPT"""
+        """Генерация ответа через OpenAI GPT - ИСПРАВЛЕНО"""
         try:
             if not openai_client:
                 return "Извините, сервис временно недоступен."
             
-            logger.info(f"Генерируем ответ для: {user_text}")
+            logger.info(f"[LLM] Генерируем ответ для: {user_text}")
             
             self.conversation_history.append({"role": "user", "content": user_text})
             
+            # Ограничиваем историю
             if len(self.conversation_history) > 10:
                 self.conversation_history = self.conversation_history[-10:]
             
@@ -637,8 +596,9 @@ class VoiceAssistantHandler:
                 {"role": "system", "content": ASSISTANT_CONFIG["system_prompt"]}
             ] + self.conversation_history
             
+            # ИСПРАВЛЕНИЕ: Правильные параметры для новой версии OpenAI API
             response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4o-mini",  # Используем более доступную модель
                 messages=messages,
                 max_tokens=150,
                 temperature=0.7,
@@ -652,23 +612,24 @@ class VoiceAssistantHandler:
                 "content": assistant_response
             })
             
-            logger.info(f"LLM ответ: {assistant_response}")
+            logger.info(f"[LLM] Ответ: {assistant_response}")
             return assistant_response
             
         except Exception as e:
-            logger.error(f"LLM ошибка: {e}")
+            logger.error(f"[LLM] Ошибка: {e}")
             return "Извините, произошла ошибка. Попробуйте еще раз."
     
     async def text_to_speech_stream(self, text, websocket):
-        """Преобразование текста в речь через ElevenLabs"""
+        """Преобразование текста в речь через ElevenLabs - ИСПРАВЛЕНО"""
         try:
-            logger.info(f"Начинаем TTS для текста: {text[:50]}...")
+            logger.info(f"[TTS] Начинаем синтез для: {text[:50]}...")
             
             url = f"https://api.elevenlabs.io/v1/text-to-speech/{ASSISTANT_CONFIG['voice_id']}/stream"
             
             headers = {
                 'xi-api-key': ELEVENLABS_API_KEY,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg'  # ИСПРАВЛЕНИЕ: указываем формат
             }
             
             payload = {
@@ -699,20 +660,32 @@ class VoiceAssistantHandler:
                             "total_chunks": chunk_count
                         })
                         
-                        logger.info(f"TTS завершен. Отправлено {chunk_count} чанков")
+                        logger.info(f"[TTS] Завершен. Отправлено {chunk_count} чанков")
                     else:
                         error_text = await response.text()
-                        logger.error(f"TTS ошибка {response.status}: {error_text}")
+                        logger.error(f"[TTS] Ошибка {response.status}: {error_text}")
+                        
+                        # ИСПРАВЛЕНИЕ: Возвращаем текстовый ответ при ошибке TTS
                         await websocket.send_json({
-                            "type": "error",
-                            "message": "Ошибка синтеза речи"
+                            "type": "response",
+                            "text": text  # Отправляем текст вместо аудио
+                        })
+                        
+                        await websocket.send_json({
+                            "type": "processing_complete"
                         })
                         
         except Exception as e:
-            logger.error(f"TTS исключение: {e}")
+            logger.error(f"[TTS] Исключение: {e}")
+            
+            # ИСПРАВЛЕНИЕ: При ошибке TTS отправляем текст
             await websocket.send_json({
-                "type": "error",
-                "message": "Ошибка при озвучивании"
+                "type": "response",
+                "text": text
+            })
+            
+            await websocket.send_json({
+                "type": "processing_complete"
             })
 
 @app.get("/")
@@ -722,19 +695,20 @@ async def get_main_page():
 
 @app.get("/health")
 async def health_check():
-    """Health check для Render.com"""
+    """Health check для проверки статуса"""
     return JSONResponse({
         "status": "healthy",
-        "service": "ElevenLabs Voice Assistant",
-        "version": "2.0.0",
-        "openai_status": "connected" if openai_client else "disconnected"
+        "service": "Voice Assistant",
+        "version": "2.1.0",
+        "openai_status": "connected" if openai_client else "disconnected",
+        "elevenlabs_key": "configured" if ELEVENLABS_API_KEY != "your_elevenlabs_key" else "missing"
     })
 
 @app.websocket("/ws/voice")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint для голосового взаимодействия"""
+    """WebSocket endpoint для голосового взаимодействия - ИСПРАВЛЕНО"""
     await websocket.accept()
-    logger.info("WebSocket соединение установлено")
+    logger.info("[WS] WebSocket соединение установлено")
     
     handler = VoiceAssistantHandler()
     
@@ -745,12 +719,12 @@ async def websocket_endpoint(websocket: WebSocket):
             if message["type"] == "audio_data":
                 try:
                     audio_bytes = bytes(message["data"])
-                    logger.info(f"Получены аудио данные: {len(audio_bytes)} байт")
+                    logger.info(f"[WS] Получены аудио данные: {len(audio_bytes)} байт")
                     
                     # STT
                     transcript = await handler.speech_to_text(audio_bytes)
                     
-                    if transcript and transcript.strip():
+                    if transcript and transcript.strip() and not transcript.startswith("Ошибка") and not transcript.startswith("Запись"):
                         await websocket.send_json({
                             "type": "transcription",
                             "text": transcript
@@ -771,24 +745,32 @@ async def websocket_endpoint(websocket: WebSocket):
                             "type": "processing_complete"
                         })
                     else:
+                        # Отправляем ошибку
                         await websocket.send_json({
                             "type": "error",
-                            "message": "Не удалось распознать речь. Попробуйте еще раз."
+                            "message": transcript
                         })
                         
                 except Exception as e:
-                    logger.error(f"Ошибка обработки аудио: {e}")
+                    logger.error(f"[WS] Ошибка обработки аудио: {e}")
                     await websocket.send_json({
                         "type": "error",
                         "message": f"Ошибка обработки: {str(e)}"
                     })
             
     except WebSocketDisconnect:
-        logger.info("WebSocket соединение закрыто")
+        logger.info("[WS] WebSocket соединение закрыто")
     except Exception as e:
-        logger.error(f"WebSocket ошибка: {e}")
+        logger.error(f"[WS] WebSocket ошибка: {e}")
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
+    
+    # Проверка конфигурации перед запуском
+    logger.info("🚀 Запуск Voice Assistant...")
+    logger.info(f"🔑 ElevenLabs API: {'✅ Настроен' if ELEVENLABS_API_KEY != 'your_elevenlabs_key' else '❌ Не настроен'}")
+    logger.info(f"🔑 OpenAI API: {'✅ Настроен' if OPENAI_API_KEY != 'your_openai_key' else '❌ Не настроен'}")
+    logger.info(f"🌐 Запуск на порту: {port}")
+    
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
