@@ -409,6 +409,9 @@
                 this.conversationId = null;
                 this.audioQueue = [];
                 this.isPlayingAudio = false;
+                this.heartbeatInterval = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
                 
                 // Настройки для PCM аудио (исправлено)
                 this.settings = {
@@ -513,15 +516,17 @@
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
                     
-                    this.log('🔗 Подключение к:', wsUrl);
+                    this.log('🔗 Подключение к:', wsUrl, `(попытка ${this.reconnectAttempts + 1})`);
                     
                     this.ws = new WebSocket(wsUrl);
                     
                     this.ws.onopen = () => {
                         this.log('✅ WebSocket подключен');
                         this.isConnected = true;
+                        this.reconnectAttempts = 0;
                         this.updateConnectionStatus(true);
                         this.updateStatus('connecting', 'Инициализация...');
+                        this.startHeartbeat();
                     };
                     
                     this.ws.onmessage = (event) => {
@@ -529,15 +534,23 @@
                         this.handleServerMessage(data);
                     };
                     
-                    this.ws.onclose = () => {
-                        this.log('❌ Соединение потеряно');
+                    this.ws.onclose = (event) => {
+                        this.log('❌ Соединение потеряно:', event.code, event.reason);
                         this.isConnected = false;
                         this.updateConnectionStatus(false);
                         this.updateStatus('disconnected', 'Соединение потеряно');
                         this.mainButton.disabled = true;
+                        this.stopHeartbeat();
                         
-                        // Переподключение через 5 секунд
-                        setTimeout(() => this.connectWebSocket(), 5000);
+                        // Переподключение с экспоненциальной задержкой
+                        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                            this.reconnectAttempts++;
+                            const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+                            this.log(`🔄 Переподключение через ${delay}ms (попытка ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+                            setTimeout(() => this.connectWebSocket(), delay);
+                        } else {
+                            this.showError('Не удалось подключиться к серверу. Обновите страницу.');
+                        }
                     };
                     
                     this.ws.onerror = (error) => {
@@ -551,17 +564,52 @@
                 }
             }
 
+            startHeartbeat() {
+                this.stopHeartbeat();
+                this.heartbeatInterval = setInterval(() => {
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.ws.send(JSON.stringify({
+                            type: 'ping',
+                            timestamp: Date.now()
+                        }));
+                    }
+                }, 30000); // Ping каждые 30 секунд
+            }
+
+            stopHeartbeat() {
+                if (this.heartbeatInterval) {
+                    clearInterval(this.heartbeatInterval);
+                    this.heartbeatInterval = null;
+                }
+            }
+
             handleServerMessage(data) {
                 const { type } = data;
                 
                 this.log(`📨 Сервер: ${type}`, data);
                 
                 switch (type) {
+                    case 'status':
+                        // Обработка статуса подключения
+                        if (data.state === 'connecting') {
+                            this.updateStatus('connecting', data.message || 'Подключение...');
+                        }
+                        break;
+                        
                     case 'conversation_ready':
                         this.conversationId = data.conversation_id;
                         this.updateStatus('connected', 'Готов к разговору! Нажмите для начала');
                         this.mainButton.disabled = false;
                         this.log(`✅ Разговор готов: ${this.conversationId}`);
+                        break;
+                        
+                    case 'conversation_initiation_metadata':
+                        // Обработка метаданных инициализации
+                        const metadata = data.conversation_initiation_metadata_event || {};
+                        if (metadata.conversation_id) {
+                            this.conversationId = metadata.conversation_id;
+                            this.log(`✅ Метаданные получены: ${this.conversationId}`);
+                        }
                         break;
                         
                     case 'user_transcript':
@@ -586,15 +634,22 @@
                         break;
                         
                     case 'audio':
-                        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: правильная обработка PCM аудио
+                        // Обработка аудио данных
+                        let audioData = null;
                         if (data.audio_data) {
-                            this.playPCMAudio(data.audio_data);
+                            audioData = data.audio_data;
+                        } else if (data.audio_event && data.audio_event.audio_base_64) {
+                            audioData = data.audio_event.audio_base_64;
+                        }
+                        
+                        if (audioData) {
+                            this.playPCMAudio(audioData);
                         }
                         break;
                         
                     case 'vad_score':
                         const vadEvent = data.vad_score_event;
-                        if (vadEvent) {
+                        if (vadEvent && typeof vadEvent.vad_score === 'number') {
                             this.updateVAD(vadEvent.vad_score);
                         }
                         break;
@@ -605,12 +660,26 @@
                         this.updateUI();
                         break;
                         
+                    case 'ping':
+                        // Отвечаем на ping от сервера
+                        this.ws.send(JSON.stringify({
+                            type: 'pong',
+                            timestamp: Date.now()
+                        }));
+                        break;
+                        
+                    case 'pong':
+                        // Получили pong - все в порядке
+                        this.log('📡 Pong получен');
+                        break;
+                        
                     case 'error':
-                        this.showError(data.message);
+                        this.showError(data.message || 'Неизвестная ошибка');
                         break;
                         
                     default:
-                        this.log(`❓ Неизвестный тип: ${type}`);
+                        this.log(`❓ Неизвестный тип сообщения: ${type}`, data);
+                        // Не показываем ошибку для неизвестных типов, просто логируем
                 }
             }
 
@@ -917,13 +986,33 @@
             }
 
             log(...args) {
-                console.log('[VoiceAssistant v2.0]', ...args);
+                console.log('[ElevenLabsAI]', ...args);
+            }
+
+            cleanup() {
+                this.stopHeartbeat();
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                }
+                if (this.audioContext) {
+                    this.audioContext.close();
+                }
+                this.isRecording = false;
+                this.isConnected = false;
+                this.isAgentSpeaking = false;
             }
         }
 
         // Запуск
         document.addEventListener('DOMContentLoaded', () => {
             window.voiceAssistant = new VoiceAssistant();
+            
+            // Cleanup при закрытии страницы
+            window.addEventListener('beforeunload', () => {
+                if (window.voiceAssistant) {
+                    window.voiceAssistant.cleanup();
+                }
+            });
         });
     </script>
 </body>
