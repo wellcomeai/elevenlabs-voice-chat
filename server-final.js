@@ -10,8 +10,8 @@ app.use(express.json());
 app.use(express.static('.'));
 
 // ElevenLabs configuration
-const ELEVENLABS_API_KEY = 'sk_95a5725ca01fdba20e15bd662d8b76152971016ff045377f';
-const AGENT_ID = 'agent_01jzwcew2ferttga9m1zcn3js1';
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || 'sk_95a5725ca01fdba20e15bd662d8b76152971016ff045377f';
+const AGENT_ID = process.env.AGENT_ID || 'agent_01jzwcew2ferttga9m1zcn3js1';
 
 console.log(`🎯 Server starting with Agent ID: ${AGENT_ID}`);
 console.log(`🔑 API Key configured: ${ELEVENLABS_API_KEY ? 'Yes' : 'No'}`);
@@ -65,7 +65,7 @@ app.get('/api/agent-id', async (req, res) => {
   }
 });
 
-// Function to check if agent exists
+// Function to check if agent exists - ИСПРАВЛЕНО
 function checkAgentExists() {
   return new Promise((resolve, reject) => {
     const options = {
@@ -74,9 +74,11 @@ function checkAgentExists() {
       path: `/v1/convai/agents/${AGENT_ID}`,
       method: 'GET',
       headers: {
-        'xi-api-key': ELEVENLABS_API_KEY
+        'xi-api-key': ELEVENLABS_API_KEY,
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',  // ✅ Добавлен User-Agent
+        'Accept': 'application/json'
       },
-      timeout: 5000 // 5 second timeout
+      timeout: 10000 // Увеличен таймаут
     };
 
     const req = https.request(options, (res) => {
@@ -95,8 +97,12 @@ function checkAgentExists() {
         } else if (res.statusCode === 404) {
           console.log('❌ Agent not found');
           resolve(false);
+        } else if (res.statusCode === 401) {
+          console.log('❌ Unauthorized - check API key');
+          reject(new Error('Unauthorized access to agent'));
         } else {
           console.log(`⚠️ Unexpected status: ${res.statusCode}`);
+          console.log('Response:', data);
           reject(new Error(`API returned ${res.statusCode}: ${data}`));
         }
       });
@@ -117,7 +123,7 @@ function checkAgentExists() {
   });
 }
 
-// ✅ SIGNED URL ENDPOINT - Получает безопасный URL для WebSocket
+// ✅ SIGNED URL ENDPOINT - ИСПРАВЛЕН КРИТИЧЕСКИЙ БАГИ
 app.get('/api/signed-url', async (req, res) => {
   console.log('🔐 Signed URL requested');
   
@@ -222,20 +228,22 @@ function getErrorRecommendations(status) {
   }
 }
 
-// Function to get signed URL with enhanced error handling
+// ✅ ИСПРАВЛЕНА КРИТИЧЕСКАЯ ОШИБКА: endpoint с подчеркиванием
 function getSignedUrl() {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.elevenlabs.io',
       port: 443,
-      path: `/v1/convai/conversation/get-signed-url?agent_id=${AGENT_ID}`,
+      // ✅ ИСПРАВЛЕНО: get-signed-url → get_signed_url
+      path: `/v1/convai/conversation/get_signed_url?agent_id=${AGENT_ID}`,
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat/1.0',
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',  // ✅ Добавлен User-Agent
+        'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
-      timeout: 10000 // 10 second timeout
+      timeout: 15000 // Увеличен таймаут до 15 секунд
     };
 
     const req = https.request(options, (res) => {
@@ -247,22 +255,26 @@ function getSignedUrl() {
       
       res.on('end', () => {
         console.log(`📊 Signed URL response: ${res.statusCode}`);
+        console.log('Response headers:', res.headers);
         
         if (res.statusCode === 200) {
           try {
             const response = JSON.parse(data);
+            console.log('Signed URL response:', response);
             if (response.signed_url) {
               resolve(response.signed_url);
             } else {
               reject(new Error('No signed_url in response'));
             }
           } catch (error) {
+            console.error('Parse error:', error);
+            console.error('Raw response:', data);
             reject(new Error(`Parse error: ${error.message}`));
           }
         } else if (res.statusCode === 401) {
           reject(new Error('Unauthorized - check API key'));
         } else if (res.statusCode === 404) {
-          reject(new Error('Agent not found'));
+          reject(new Error('Agent not found or endpoint not found'));
         } else if (res.statusCode === 429) {
           reject(new Error('Rate limit exceeded'));
         } else {
@@ -271,10 +283,13 @@ function getSignedUrl() {
             const errorData = JSON.parse(data);
             if (errorData.detail) {
               errorMsg += ` - ${errorData.detail}`;
+            } else if (errorData.error) {
+              errorMsg += ` - ${errorData.error}`;
             }
           } catch (e) {
             errorMsg += ` - ${data}`;
           }
+          console.error('Full error response:', data);
           reject(new Error(errorMsg));
         }
       });
@@ -331,9 +346,10 @@ function checkElevenLabsAPI() {
       path: '/v1/user',
       method: 'GET',
       headers: {
-        'xi-api-key': ELEVENLABS_API_KEY
+        'xi-api-key': ELEVENLABS_API_KEY,
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.0'
       },
-      timeout: 3000 // Quick 3 second timeout
+      timeout: 5000
     };
 
     const req = https.request(options, (res) => {
