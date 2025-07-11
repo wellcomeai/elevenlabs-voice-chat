@@ -30,11 +30,13 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "your_elevenlabs_key")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your_openai_key")
 
 # ВАЖНО: Используйте ваши реальные ключи!
-if ELEVENLABS_API_KEY == "your_elevenlabs_key":
-    logger.warning("⚠️  Используется тестовый ключ ElevenLabs! Установите правильный ELEVENLABS_API_KEY")
+if ELEVENLABS_API_KEY == "your_elevenlabs_key" or not ELEVENLABS_API_KEY:
+    logger.warning("⚠️  ELEVENLABS_API_KEY не установлен! Установите переменную окружения.")
+    logger.warning("⚠️  STT функция будет работать с ошибками!")
 
-if OPENAI_API_KEY == "your_openai_key":
-    logger.warning("⚠️  Используется тестовый ключ OpenAI! Установите правильный OPENAI_API_KEY")
+if OPENAI_API_KEY == "your_openai_key" or not OPENAI_API_KEY:
+    logger.warning("⚠️  OPENAI_API_KEY не установлен! Установите переменную окружения.")
+    logger.warning("⚠️  LLM функция будет работать с ошибками!")
 
 # Конфигурация ассистента
 ASSISTANT_CONFIG = {
@@ -493,29 +495,50 @@ class VoiceAssistantHandler:
                 logger.warning("[STT] Аудио слишком короткое")
                 return "Запись слишком короткая. Попробуйте говорить дольше."
             
-            # ИСПРАВЛЕНИЕ: Создаем правильный временный файл
-            with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as temp_file:
-                temp_file.write(audio_data)
-                temp_file_path = temp_file.name
-            
+            # ИСПРАВЛЕНИЕ: Правильная работа с временным файлом
+            temp_file_path = None
             try:
+                # Создаем временный файл и записываем данные
+                with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as temp_file:
+                    temp_file.write(audio_data)
+                    temp_file_path = temp_file.name
+                
+                logger.info(f"[STT] Временный файл создан: {temp_file_path}")
+                
+                # Проверяем что файл существует и не пуст
+                if not os.path.exists(temp_file_path):
+                    logger.error("[STT] Временный файл не найден")
+                    return "Ошибка создания временного файла"
+                
+                file_size = os.path.getsize(temp_file_path)
+                logger.info(f"[STT] Размер файла: {file_size} байт")
+                
+                if file_size == 0:
+                    logger.error("[STT] Временный файл пуст")
+                    return "Ошибка: пустой файл"
+                
                 url = "https://api.elevenlabs.io/v1/speech-to-text"
                 headers = {'xi-api-key': ELEVENLABS_API_KEY}
                 
-                # ИСПРАВЛЕНИЕ: Правильное формирование запроса с файлом
+                # ИСПРАВЛЕНИЕ: Правильное чтение файла для FormData
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                    data = aiohttp.FormData()
-                    
-                    # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: передаем файл правильно
+                    # Читаем весь файл в память для FormData
                     with open(temp_file_path, 'rb') as audio_file:
-                        data.add_field('audio', audio_file, 
-                                     filename='audio.webm', 
-                                     content_type='audio/webm')
+                        audio_content = audio_file.read()
                     
-                    # Добавляем модель
+                    logger.info(f"[STT] Прочитано из файла: {len(audio_content)} байт")
+                    
+                    data = aiohttp.FormData()
+                    data.add_field('audio', audio_content, 
+                                 filename='audio.webm', 
+                                 content_type='audio/webm')
                     data.add_field('model_id', 'eleven_multilingual_sts_v2')
                     
+                    logger.info("[STT] Отправляем запрос к ElevenLabs...")
+                    
                     async with session.post(url, data=data, headers=headers) as response:
+                        logger.info(f"[STT] Ответ от ElevenLabs: {response.status}")
+                        
                         if response.status == 200:
                             result = await response.json()
                             transcript = result.get('text', '').strip()
@@ -538,10 +561,12 @@ class VoiceAssistantHandler:
                         
             finally:
                 # Очищаем временный файл
-                try:
-                    os.unlink(temp_file_path)
-                except:
-                    pass
+                if temp_file_path and os.path.exists(temp_file_path):
+                    try:
+                        os.unlink(temp_file_path)
+                        logger.info(f"[STT] Временный файл удален: {temp_file_path}")
+                    except Exception as cleanup_error:
+                        logger.warning(f"[STT] Не удалось удалить временный файл: {cleanup_error}")
                         
         except Exception as e:
             logger.error(f"[STT] Общая ошибка: {e}")
@@ -550,20 +575,31 @@ class VoiceAssistantHandler:
     async def _try_alternative_stt(self, file_path):
         """Попытка с альтернативной моделью STT"""
         try:
+            logger.info("[STT ALT] Пробуем альтернативную модель")
+            
+            if not os.path.exists(file_path):
+                logger.error("[STT ALT] Файл не найден")
+                return "Файл не найден для альтернативной обработки"
+            
             url = "https://api.elevenlabs.io/v1/speech-to-text"
             headers = {'xi-api-key': ELEVENLABS_API_KEY}
             
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-                data = aiohttp.FormData()
-                
+                # Читаем файл в память
                 with open(file_path, 'rb') as audio_file:
-                    data.add_field('audio', audio_file, 
-                                 filename='audio.webm', 
-                                 content_type='audio/webm')
+                    audio_content = audio_file.read()
                 
+                logger.info(f"[STT ALT] Прочитано: {len(audio_content)} байт")
+                
+                data = aiohttp.FormData()
+                data.add_field('audio', audio_content, 
+                             filename='audio.webm', 
+                             content_type='audio/webm')
                 data.add_field('model_id', 'eleven_english_sts_v2')
                 
                 async with session.post(url, data=data, headers=headers) as response:
+                    logger.info(f"[STT ALT] Ответ: {response.status}")
+                    
                     if response.status == 200:
                         result = await response.json()
                         transcript = result.get('text', '').strip()
@@ -571,6 +607,9 @@ class VoiceAssistantHandler:
                         if transcript and len(transcript) > 1:
                             logger.info(f"[STT ALT] Успешно: {transcript}")
                             return transcript
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"[STT ALT] Ошибка {response.status}: {error_text}")
             
             return "Не удалось распознать речь. Попробуйте говорить четче."
             
@@ -696,12 +735,21 @@ async def get_main_page():
 @app.get("/health")
 async def health_check():
     """Health check для проверки статуса"""
+    elevenlabs_configured = ELEVENLABS_API_KEY and ELEVENLABS_API_KEY != "your_elevenlabs_key"
+    openai_configured = OPENAI_API_KEY and OPENAI_API_KEY != "your_openai_key"
+    
     return JSONResponse({
         "status": "healthy",
         "service": "Voice Assistant",
         "version": "2.1.0",
-        "openai_status": "connected" if openai_client else "disconnected",
-        "elevenlabs_key": "configured" if ELEVENLABS_API_KEY != "your_elevenlabs_key" else "missing"
+        "openai_status": "connected" if openai_client else "disconnected", 
+        "elevenlabs_key": "configured" if elevenlabs_configured else "missing",
+        "openai_key": "configured" if openai_configured else "missing",
+        "issues": [
+            "ElevenLabs API key not set" if not elevenlabs_configured else None,
+            "OpenAI API key not set" if not openai_configured else None,
+            "OpenAI client failed to initialize" if not openai_client else None
+        ]
     })
 
 @app.websocket("/ws/voice")
