@@ -84,7 +84,9 @@
         <div class="status-card">
             <h2>🌐 WebSocket Test</h2>
             <div id="websocketStatus">Not tested</div>
-            <button onclick="testWebSocket()">🧪 Test WebSocket</button>
+            <button onclick="testWebSocket()">🧪 Test WebSocket (Signed URL)</button>
+            <button onclick="testDirectWebSocket()">🔗 Test Direct WebSocket</button>
+            <button onclick="testSignedUrl()">🔐 Test Signed URL Only</button>
         </div>
 
         <div class="status-card">
@@ -160,52 +162,126 @@
         }
 
         async function testWebSocket() {
-            log('INFO', 'Testing WebSocket connection...');
+            log('INFO', 'Testing WebSocket connection with signed URL...');
             
             try {
-                // First get agent config
-                const configResponse = await fetch('/api/agent-id');
-                const config = await configResponse.json();
+                // First get signed URL
+                log('INFO', 'Requesting signed URL...');
+                const signedResponse = await fetch('/api/signed-url');
                 
-                if (!config.agent_id) {
-                    throw new Error('No agent ID available');
+                if (!signedResponse.ok) {
+                    const errorData = await signedResponse.json();
+                    log('WARN', `Signed URL failed: ${errorData.error}`);
+                    log('INFO', `Trying fallback URL: ${errorData.fallback_url}`);
+                    
+                    // Try fallback direct connection
+                    testDirectWebSocket(errorData.fallback_url);
+                    return;
                 }
                 
-                const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${config.agent_id}`;
-                log('INFO', `Connecting to: ${wsUrl}`);
+                const signedData = await signedResponse.json();
+                const wsUrl = signedData.signed_url;
+                
+                log('SUCCESS', `Signed URL obtained: ${wsUrl.substring(0, 50)}...`);
+                
+                // Test WebSocket with signed URL
+                log('INFO', `Connecting to signed WebSocket...`);
                 
                 const ws = new WebSocket(wsUrl);
                 
                 ws.onopen = () => {
-                    log('SUCCESS', 'WebSocket connected successfully');
+                    log('SUCCESS', 'WebSocket connected successfully with signed URL!');
                     document.getElementById('websocketStatus').innerHTML = 
-                        '<span style="color: #00ff00;">✅ WebSocket OK</span>';
+                        '<span style="color: #00ff00;">✅ WebSocket OK (Signed URL)</span>';
                     ws.close();
                 };
                 
                 ws.onerror = (error) => {
-                    log('ERROR', `WebSocket error: ${error}`);
+                    log('ERROR', `WebSocket error with signed URL: ${error}`);
                     document.getElementById('websocketStatus').innerHTML = 
-                        '<span style="color: #ff0000;">❌ WebSocket Failed</span>';
+                        '<span style="color: #ff0000;">❌ WebSocket Failed (Signed URL)</span>';
                 };
                 
-                ws.onclose = () => {
-                    log('INFO', 'WebSocket connection closed');
+                ws.onclose = (event) => {
+                    log('INFO', `WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
                 };
                 
-                // Close after 5 seconds if still open
+                // Close after 10 seconds if still open
                 setTimeout(() => {
                     if (ws.readyState === WebSocket.OPEN) {
                         ws.close();
-                        log('INFO', 'WebSocket test completed');
+                        log('INFO', 'WebSocket test completed (signed URL)');
                     }
-                }, 5000);
+                }, 10000);
                 
             } catch (error) {
-                log('ERROR', `WebSocket test failed: ${error.message}`);
-                document.getElementById('websocketStatus').innerHTML = 
-                    '<span style="color: #ff0000;">❌ Test Failed</span>';
+                log('ERROR', `Signed URL test failed: ${error.message}`);
+                
+                // Fallback to direct connection test
+                log('INFO', 'Trying direct WebSocket connection as fallback...');
+                testDirectWebSocket();
             }
+        }
+
+        async function testSignedUrl() {
+            log('INFO', 'Testing signed URL generation...');
+            
+            try {
+                const response = await fetch('/api/signed-url');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    log('SUCCESS', `Signed URL generated successfully`);
+                    log('DATA', `URL preview: ${data.signed_url.substring(0, 80)}...`);
+                    log('DATA', `Agent ID: ${data.agent_id}`);
+                    
+                    document.getElementById('websocketStatus').innerHTML = 
+                        '<span style="color: #00ff00;">✅ Signed URL Generated</span>';
+                } else {
+                    log('ERROR', `Signed URL generation failed: ${data.error}`);
+                    log('INFO', `Fallback URL available: ${data.fallback_url || 'No'}`);
+                    
+                    document.getElementById('websocketStatus').innerHTML = 
+                        '<span style="color: #ffaa00;">⚠️ Signed URL Failed</span>';
+                }
+                
+            } catch (error) {
+                log('ERROR', `Signed URL test failed: ${error.message}`);
+                document.getElementById('websocketStatus').innerHTML = 
+                    '<span style="color: #ff0000;">❌ Signed URL Error</span>';
+            }
+        }
+
+        function testDirectWebSocket(fallbackUrl = null) {
+            const wsUrl = fallbackUrl || `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=agent_01jzwcew2ferttga9m1zcn3js1`;
+            
+            log('INFO', `Testing direct WebSocket: ${wsUrl}`);
+            
+            const ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                log('SUCCESS', 'Direct WebSocket connected successfully');
+                document.getElementById('websocketStatus').innerHTML = 
+                    '<span style="color: #00ff00;">✅ WebSocket OK (Direct)</span>';
+                ws.close();
+            };
+            
+            ws.onerror = (error) => {
+                log('ERROR', `Direct WebSocket error: ${error}`);
+                document.getElementById('websocketStatus').innerHTML = 
+                    '<span style="color: #ff0000;">❌ WebSocket Failed (Both methods)</span>';
+            };
+            
+            ws.onclose = (event) => {
+                log('INFO', `Direct WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
+            };
+            
+            setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.close();
+                    log('INFO', 'Direct WebSocket test completed');
+                }
+            }, 10000);
         }
 
         function updateSystemStatus(data) {
