@@ -393,8 +393,35 @@
                         } 
                     });
 
-                    // Initialize WebSocket
-                    const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
+                    // ✅ НОВОЕ: Получаем signed URL с сервера
+                    this.addMessage('system', '🔐 Получение безопасного URL...');
+                    
+                    let wsUrl;
+                    try {
+                        const signedUrlResponse = await fetch('/api/signed-url');
+                        
+                        if (signedUrlResponse.ok) {
+                            const signedData = await signedUrlResponse.json();
+                            wsUrl = signedData.signed_url;
+                            console.log('✅ Using signed URL for WebSocket connection');
+                            this.addMessage('system', '✅ Безопасный URL получен');
+                        } else {
+                            // Fallback to direct connection if signed URL fails
+                            const fallbackData = await signedUrlResponse.json();
+                            wsUrl = fallbackData.fallback_url || `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
+                            console.log('⚠️ Using fallback direct URL');
+                            this.addMessage('system', '⚠️ Используется резервное подключение');
+                        }
+                    } catch (error) {
+                        console.error('Failed to get signed URL, using direct connection:', error);
+                        wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
+                        this.addMessage('system', '⚠️ Используется прямое подключение');
+                    }
+
+                    // Initialize WebSocket with obtained URL
+                    console.log('🔗 Connecting to WebSocket:', wsUrl);
+                    this.addMessage('system', '🔗 Подключение к голосовому агенту...');
+                    
                     this.ws = new WebSocket(wsUrl);
 
                     this.ws.onopen = () => this.onWebSocketOpen();
@@ -404,7 +431,17 @@
 
                 } catch (error) {
                     console.error('Connection failed:', error);
-                    this.addMessage('system', '❌ Ошибка подключения: ' + error.message);
+                    
+                    let errorMessage = '❌ Ошибка подключения: ';
+                    if (error.name === 'NotAllowedError') {
+                        errorMessage += 'Нет доступа к микрофону. Разрешите использование микрофона.';
+                    } else if (error.name === 'NotFoundError') {
+                        errorMessage += 'Микрофон не найден. Подключите микрофон.';
+                    } else {
+                        errorMessage += error.message;
+                    }
+                    
+                    this.addMessage('system', errorMessage);
                     this.updateStatus('disconnected', '🔴 Отключен');
                 }
             }
@@ -468,7 +505,24 @@
 
             onWebSocketError(error) {
                 console.error('WebSocket error:', error);
-                this.addMessage('system', '❌ Ошибка соединения');
+                
+                // Более понятные сообщения об ошибках
+                let errorMessage = '❌ Ошибка WebSocket соединения';
+                
+                if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+                    errorMessage = '❌ Не удалось подключиться к голосовому агенту';
+                    this.addMessage('system', errorMessage);
+                    this.addMessage('system', '💡 Возможные причины:');
+                    this.addMessage('system', '• Агент требует дополнительной аутентификации');
+                    this.addMessage('system', '• Проблемы с сетевым подключением');
+                    this.addMessage('system', '• Временные проблемы на сервере ElevenLabs');
+                    this.addMessage('system', '🔄 Попробуйте обновить страницу');
+                } else {
+                    errorMessage = '❌ Соединение с голосовым агентом прервано';
+                    this.addMessage('system', errorMessage);
+                }
+                
+                this.updateStatus('disconnected', '🔴 Ошибка соединения');
             }
 
             handleInitiation(data) {
