@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(express.static('.'));
 
 // ElevenLabs API configuration
-const ELEVENLABS_API_KEY = 'sk_29b8a29eb2a7e8a62521a36d7c3c34c245d0ca0daaded3da';
+const ELEVENLABS_API_KEY = 'sk_c7fa150ef1e89f3e73c955f63d0f4d781f50a701548d3dde';
 const API_BASE_URL = 'api.elevenlabs.io';
 
 // Function to check account status first
