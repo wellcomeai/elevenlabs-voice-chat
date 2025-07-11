@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElevenLabs AI Assistant</title>
+    <title>🎤 ElevenLabs Voice Chat</title>
     <style>
         * {
             margin: 0;
@@ -19,7 +19,6 @@
             justify-content: center;
             align-items: center;
             color: white;
-            overflow: hidden;
         }
 
         .container {
@@ -108,9 +107,9 @@
             animation: wave-speaking 0.8s ease-in-out infinite;
         }
 
-        .main-button.processing {
-            background: linear-gradient(135deg, #fdcb6e, #e17055);
-            animation: spin-processing 1.2s linear infinite;
+        .main-button.recording {
+            background: linear-gradient(135deg, #e17055, #d63031);
+            animation: pulse-recording 1.5s infinite;
         }
 
         .main-button:disabled {
@@ -134,9 +133,9 @@
             75% { transform: scale(0.95); }
         }
 
-        @keyframes spin-processing {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+        @keyframes pulse-recording {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
         }
 
         .status-text {
@@ -270,27 +269,6 @@
             box-shadow: 0 8px 25px rgba(116, 185, 255, 0.4);
         }
 
-        .stats {
-            margin-top: 1.5rem;
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 1rem;
-            font-size: 0.85rem;
-        }
-
-        .stat-item {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 1rem;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-        }
-
-        .stat-value {
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: #74b9ff;
-        }
-
         .connection-indicator {
             position: absolute;
             top: 20px;
@@ -318,7 +296,28 @@
             display: none;
         }
 
-        /* Responsive Design */
+        .stats {
+            margin-top: 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1rem;
+            font-size: 0.85rem;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #74b9ff;
+        }
+
+        /* Responsive */
         @media (max-width: 768px) {
             .container {
                 padding: 2rem;
@@ -346,20 +345,20 @@
         <div class="connection-indicator" id="connectionIndicator"></div>
         
         <div class="header">
-            <h1 class="title">🎤 ElevenLabs AI</h1>
-            <p class="subtitle">Разговорный AI ассистент</p>
-            <div class="status-badge disconnected" id="statusBadge">Не подключен</div>
+            <h1 class="title">🎤 Voice Assistant</h1>
+            <p class="subtitle">Powered by ElevenLabs AI</p>
+            <div class="status-badge disconnected" id="statusBadge">Подключение...</div>
         </div>
 
         <button class="main-button" id="mainButton" disabled>
             <span id="buttonIcon">📞</span>
         </button>
 
-        <div class="status-text" id="statusText">Подключение к серверу...</div>
+        <div class="status-text" id="statusText">Инициализация...</div>
 
         <div class="audio-visualizer">
             <div class="audio-bars" id="audioBars">
-                <!-- Будут созданы динамически -->
+                <!-- Создаются динамически -->
             </div>
             <div class="vad-indicator" id="vadIndicator"></div>
         </div>
@@ -398,14 +397,15 @@
     </div>
 
     <script>
-        class ElevenLabsAIClient {
+        class VoiceAssistant {
             constructor() {
                 this.ws = null;
+                this.isRecording = false;
+                this.isConnected = false;
+                this.isAgentSpeaking = false;
                 this.mediaRecorder = null;
                 this.audioContext = null;
                 this.analyser = null;
-                this.isRecording = false;
-                this.isConnected = false;
                 this.conversationId = null;
                 
                 // Настройки
@@ -414,7 +414,7 @@
                     noiseSuppression: true,
                     echoCancellation: true,
                     sampleRate: 16000,
-                    chunkInterval: 250 // мс
+                    chunkInterval: 250
                 };
                 
                 // Статистика
@@ -453,7 +453,6 @@
             }
 
             createAudioBars() {
-                // Создаем аудио-визуализатор
                 for (let i = 0; i < 20; i++) {
                     const bar = document.createElement('div');
                     bar.className = 'audio-bar';
@@ -464,7 +463,9 @@
 
             bindEvents() {
                 this.mainButton.addEventListener('click', () => {
-                    if (this.isRecording) {
+                    if (this.isAgentSpeaking) {
+                        this.stopSpeaking();
+                    } else if (this.isRecording) {
                         this.stopRecording();
                     } else {
                         this.startRecording();
@@ -510,14 +511,15 @@
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
                     
+                    this.log('🔗 Подключение к:', wsUrl);
+                    
                     this.ws = new WebSocket(wsUrl);
                     
                     this.ws.onopen = () => {
-                        this.log('🔗 Подключен к серверу');
+                        this.log('✅ WebSocket подключен');
                         this.isConnected = true;
                         this.updateConnectionStatus(true);
-                        this.updateStatus('connected', 'Подключен! Нажмите для начала разговора');
-                        this.mainButton.disabled = false;
+                        this.updateStatus('connecting', 'Инициализация...');
                     };
                     
                     this.ws.onmessage = (event) => {
@@ -526,7 +528,7 @@
                     };
                     
                     this.ws.onclose = () => {
-                        this.log('❌ Соединение с сервером потеряно');
+                        this.log('❌ Соединение потеряно');
                         this.isConnected = false;
                         this.updateConnectionStatus(false);
                         this.updateStatus('disconnected', 'Соединение потеряно');
@@ -553,33 +555,45 @@
                 this.log(`📨 Сервер: ${type}`, data);
                 
                 switch (type) {
-                    case 'conversation_ready':
-                        this.conversationId = data.conversation_id;
+                    case 'conversation_initiation_metadata':
+                        const metadata = data.conversation_initiation_metadata_event;
+                        this.conversationId = metadata.conversation_id;
+                        this.updateStatus('connected', 'Готов к разговору! Нажмите для начала');
+                        this.mainButton.disabled = false;
                         this.log(`✅ Разговор готов: ${this.conversationId}`);
                         break;
                         
                     case 'user_transcript':
-                        this.addMessage('user', data.text);
-                        this.stats.messagesCount++;
-                        this.updateStats();
+                        const transcript = data.user_transcription_event;
+                        if (transcript.user_transcript) {
+                            this.addMessage('user', transcript.user_transcript);
+                            this.stats.messagesCount++;
+                            this.updateStats();
+                        }
                         break;
                         
                     case 'agent_response':
-                        this.addMessage('assistant', data.text);
+                        const response = data.agent_response_event;
+                        this.addMessage('assistant', response.agent_response);
                         this.stats.messagesCount++;
                         this.updateStats();
+                        this.isAgentSpeaking = true;
+                        this.updateUI();
+                        this.statusText.textContent = '🔊 AI говорит...';
                         break;
                         
-                    case 'audio_response':
-                        this.playAudio(data.audio, data.audio_format);
+                    case 'audio':
+                        this.playAudio(data.audio_event.audio_base_64);
                         break;
                         
                     case 'vad_score':
-                        this.updateVAD(data.score);
+                        this.updateVAD(data.vad_score_event.vad_score);
                         break;
                         
                     case 'interruption':
                         this.statusText.textContent = '⚡ Перебивание обнаружено';
+                        this.isAgentSpeaking = false;
+                        this.updateUI();
                         break;
                         
                     case 'error':
@@ -587,7 +601,7 @@
                         break;
                         
                     default:
-                        this.log(`❓ Неизвестный тип сообщения: ${type}`);
+                        this.log(`❓ Неизвестный тип: ${type}`);
                 }
             }
 
@@ -595,7 +609,6 @@
                 try {
                     this.clearError();
                     
-                    // Запрашиваем доступ к микрофону
                     const stream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             sampleRate: this.settings.sampleRate,
@@ -606,17 +619,16 @@
                         }
                     });
 
-                    // Создаем аудио контекст для визуализации
+                    // Аудио контекст для визуализации
                     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                     const source = this.audioContext.createMediaStreamSource(stream);
                     this.analyser = this.audioContext.createAnalyser();
                     this.analyser.fftSize = 256;
                     source.connect(this.analyser);
                     
-                    // Запускаем визуализацию
                     this.startAudioVisualization();
 
-                    // Создаем MediaRecorder
+                    // MediaRecorder
                     this.mediaRecorder = new MediaRecorder(stream, {
                         mimeType: 'audio/webm;codecs=opus',
                         audioBitsPerSecond: 16000
@@ -633,7 +645,6 @@
                         this.stopAudioVisualization();
                     };
 
-                    // Начинаем запись
                     this.mediaRecorder.start(this.settings.chunkInterval);
                     this.isRecording = true;
                     this.updateUI();
@@ -654,15 +665,20 @@
                 }
             }
 
+            stopSpeaking() {
+                this.isAgentSpeaking = false;
+                this.updateUI();
+                this.statusText.textContent = 'Готов к разговору';
+            }
+
             async sendAudioChunk(audioBlob) {
                 try {
                     const arrayBuffer = await audioBlob.arrayBuffer();
-                    const audioArray = Array.from(new Uint8Array(arrayBuffer));
+                    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
                     
                     this.ws.send(JSON.stringify({
-                        type: 'audio_chunk',
-                        data: audioArray,
-                        timestamp: Date.now()
+                        type: 'user_audio_chunk',
+                        user_audio_chunk: base64
                     }));
                     
                     this.stats.audioChunks++;
@@ -673,56 +689,29 @@
                 }
             }
 
-            async playAudio(audioBase64, format) {
+            async playAudio(audioBase64) {
                 try {
-                    // Декодируем base64 аудио
                     const audioData = atob(audioBase64);
                     const audioArray = new Uint8Array(audioData.length);
                     for (let i = 0; i < audioData.length; i++) {
                         audioArray[i] = audioData.charCodeAt(i);
                     }
                     
-                    // Воспроизводим через Web Audio API
-                    if (!this.audioContext) {
-                        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    }
+                    const audioBlob = new Blob([audioArray], { type: 'audio/mpeg' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
                     
-                    const audioBuffer = await this.audioContext.decodeAudioData(audioArray.buffer);
-                    const source = this.audioContext.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(this.audioContext.destination);
-                    
-                    this.updateButtonState('speaking');
-                    this.statusText.textContent = '🔊 AI говорит...';
-                    
-                    source.onended = () => {
-                        this.updateUI();
-                        this.statusText.textContent = 'Готов к разговору';
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        if (!this.isAgentSpeaking) {
+                            this.statusText.textContent = 'Готов к разговору';
+                        }
                     };
                     
-                    source.start();
+                    await audio.play();
                     
                 } catch (error) {
-                    this.log('❌ Ошибка воспроизведения аудио:', error);
-                    
-                    // Fallback: простое воспроизведение через Audio элемент
-                    try {
-                        const audioBlob = new Blob([
-                            Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))
-                        ], { type: 'audio/pcm' });
-                        
-                        const audioUrl = URL.createObjectURL(audioBlob);
-                        const audio = new Audio(audioUrl);
-                        audio.play();
-                        
-                        audio.onended = () => {
-                            URL.revokeObjectURL(audioUrl);
-                            this.updateUI();
-                        };
-                        
-                    } catch (fallbackError) {
-                        this.log('❌ Fallback аудио тоже не работает:', fallbackError);
-                    }
+                    this.log('❌ Ошибка воспроизведения:', error);
                 }
             }
 
@@ -737,7 +726,6 @@
                     
                     this.analyser.getByteFrequencyData(dataArray);
                     
-                    // Обновляем аудио-бары
                     for (let i = 0; i < bars.length; i++) {
                         const barHeight = (dataArray[i * 2] / 255) * 60;
                         bars[i].style.height = `${Math.max(barHeight, 4)}px`;
@@ -759,13 +747,10 @@
             updateVAD(score) {
                 this.stats.vadScore = Math.round(score * 100);
                 this.updateStats();
-                
-                // Обновляем VAD индикатор
                 this.vadIndicator.classList.toggle('active', score > 0.5);
             }
 
             addMessage(role, text) {
-                // Удаляем placeholder если есть
                 const empty = this.conversationContent.querySelector('.conversation-empty');
                 if (empty) {
                     empty.remove();
@@ -789,19 +774,16 @@
             }
 
             updateUI() {
-                this.updateButtonState();
-            }
-
-            updateButtonState(state = null) {
                 this.mainButton.className = 'main-button';
                 
-                if (state === 'speaking') {
+                if (this.isRecording) {
+                    this.mainButton.classList.add('recording');
+                    this.buttonIcon.textContent = '⏹️';
+                } else if (this.isAgentSpeaking) {
                     this.mainButton.classList.add('speaking');
                     this.buttonIcon.textContent = '🔊';
-                } else if (this.isRecording) {
-                    this.mainButton.classList.add('listening');
-                    this.buttonIcon.textContent = '⏹️';
                 } else {
+                    this.mainButton.classList.add('listening');
                     this.buttonIcon.textContent = '🎤';
                 }
             }
@@ -840,7 +822,6 @@
                 this.log(`🚨 Ошибка: ${message}`);
                 this.errorMessage.textContent = message;
                 this.errorMessage.style.display = 'block';
-                
                 setTimeout(() => {
                     this.errorMessage.style.display = 'none';
                 }, 5000);
@@ -851,18 +832,13 @@
             }
 
             log(...args) {
-                console.log('[ElevenLabsAI]', ...args);
-                
-                // Если включен debug режим, можно добавить визуальные логи
-                if (this.debugBtn?.classList.contains('active')) {
-                    // TODO: Добавить визуальные логи в интерфейс
-                }
+                console.log('[VoiceAssistant]', ...args);
             }
         }
 
-        // Запуск приложения
+        // Запуск
         document.addEventListener('DOMContentLoaded', () => {
-            window.elevenLabsClient = new ElevenLabsAIClient();
+            window.voiceAssistant = new VoiceAssistant();
         });
     </script>
 </body>
