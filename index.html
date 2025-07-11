@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElevenLabs Voice Chat - ИИ Помощник</title>
+    <title>ElevenLabs Voice Chat - ИИ Помощник v4.0</title>
     <style>
         * {
             margin: 0;
@@ -101,6 +101,7 @@
             background: #ffeaa7;
             color: #d63031;
             border-left: 4px solid #d63031;
+            animation: interrupted-flash 0.5s infinite;
         }
 
         @keyframes pulse {
@@ -116,6 +117,11 @@
         @keyframes recording-pulse {
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.9; transform: scale(1.05); }
+        }
+
+        @keyframes interrupted-flash {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
         }
 
         .controls {
@@ -157,6 +163,17 @@
         .btn-danger {
             background: linear-gradient(45deg, #ff6b6b, #ee5a52);
             color: white;
+        }
+
+        .btn-interrupt {
+            background: linear-gradient(45deg, #ffa502, #ff6348);
+            color: white;
+            font-size: 0.9rem;
+            padding: 0.8rem 1.5rem;
+        }
+
+        .btn-interrupt:disabled {
+            background: #ccc;
         }
 
         .chat-area {
@@ -316,6 +333,17 @@
             text-align: left;
         }
 
+        .interruption-stats {
+            margin: 0.5rem 0;
+            font-size: 0.75rem;
+            color: #444;
+            text-align: left;
+            background: #f0f8ff;
+            padding: 0.5rem;
+            border-radius: 4px;
+            border-left: 3px solid #667eea;
+        }
+
         .settings-panel {
             margin: 1rem 0;
             padding: 1rem;
@@ -362,8 +390,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1 class="title">🎤 ИИ Голосовой Помощник</h1>
-            <p class="subtitle">Powered by ElevenLabs Conversational AI v3.0 • Улучшенная аудио система</p>
+            <h1 class="title">🎤 ИИ Голосовой Помощник v4.0</h1>
+            <p class="subtitle">Powered by ElevenLabs Conversational AI • Система быстрого перебивания</p>
         </div>
 
         <div id="status" class="status disconnected">
@@ -376,6 +404,9 @@
             </button>
             <button id="disconnectBtn" class="btn btn-danger" disabled>
                 ⛔ Отключиться
+            </button>
+            <button id="interruptBtn" class="btn btn-interrupt" disabled>
+                ⚡ Прервать
             </button>
             <button id="diagnosticsBtn" class="btn btn-primary" style="background: linear-gradient(45deg, #2d3748, #4a5568);">
                 🔍 Диагностика
@@ -397,6 +428,14 @@
         <div class="connection-stats" id="connectionStats">
             <div>Ping: <span id="pingTime">-</span>ms</div>
             <div>Статус: <span id="connectionState">Отключен</span></div>
+            <div>Устройство: <span id="deviceType">Определение...</span></div>
+        </div>
+
+        <div class="interruption-stats" id="interruptionStats">
+            <div><strong>📊 Статистика перебиваний:</strong></div>
+            <div>Всего: <span id="interruptionCount">0</span></div>
+            <div>Время защиты: <span id="protectionTime">200</span>мс</div>
+            <div>Последнее: <span id="lastInterruption">-</span></div>
         </div>
 
         <div class="audio-debug" id="audioDebug">
@@ -436,6 +475,15 @@
                     <option value="0.02">Высокий</option>
                 </select>
             </div>
+            <div class="setting-row">
+                <label>Защита от дребезга:</label>
+                <select id="protectionTimeSetting">
+                    <option value="100">100мс (Агрессивно)</option>
+                    <option value="150">150мс (iOS оптимально)</option>
+                    <option value="200" selected>200мс (Стандарт)</option>
+                    <option value="300">300мс (Консервативно)</option>
+                </select>
+            </div>
         </div>
 
         <div class="chat-area" id="chatArea">
@@ -452,7 +500,7 @@
                 💡 При проблемах с подключением нажмите "Диагностика"
             </p>
             <p style="margin-top: 0.25rem; font-size: 0.75rem; color: #999;">
-                v3.0 • Система очереди аудио • Устранение дублирования • Плавное воспроизведение • Настройки качества
+                v4.0 • Система быстрого перебивания • Оптимизация для iOS/Android • Защита от дребезга
             </p>
         </div>
     </div>
@@ -460,7 +508,7 @@
     <script>
         class VoiceChat {
             constructor() {
-                console.log('🚀 VoiceChat v3.0 constructor started');
+                console.log('🚀 VoiceChat v4.0 with Fast Interruption System started');
                 
                 // Основные состояния
                 this.ws = null;
@@ -470,7 +518,7 @@
                 this.conversationId = null;
                 this.initializationTimeout = null;
                 
-                // ✅ УЛУЧШЕННАЯ аудио система с очередью
+                // Аудио система с очередью
                 this.audioStream = null;
                 this.audioContext = null;
                 this.audioProcessor = null;
@@ -481,7 +529,7 @@
                 this.voiceActivityThreshold = 0.01;
                 this.lastUserSpeechTime = Date.now();
                 
-                // ✅ НОВАЯ система очереди аудио
+                // Система очереди аудио
                 this.audioQueue = [];
                 this.currentAudioSource = null;
                 this.isProcessingAudio = false;
@@ -496,22 +544,285 @@
                 this.lastPingTime = null;
                 this.pingInterval = null;
                 
-                // ✅ Настройки качества
+                // Настройки качества
                 this.settings = {
-                    audioChunkDelay: 50, // мс между чанками
-                    maxQueueSize: 10, // максимум чанков в очереди
-                    interruptionDelay: 200, // мс задержки при прерывании
-                    resumeListeningDelay: 300, // мс перед возобновлением записи
-                    fadeInDuration: 100, // мс для плавного появления звука
-                    fadeOutDuration: 50 // мс для плавного затухания
+                    audioChunkDelay: 50,
+                    maxQueueSize: 10,
+                    interruptionDelay: 200,
+                    resumeListeningDelay: 300,
+                    fadeInDuration: 100,
+                    fadeOutDuration: 50
                 };
+                
+                // ✅ НОВАЯ СИСТЕМА ПЕРЕБИВАНИЯ
+                this.initializeInterruptionSystem();
                 
                 this.initializeElements();
                 this.setupSettingsHandlers();
                 this.loadAgentConfig();
                 this.startAudioQueueMonitoring();
                 
-                console.log('✅ VoiceChat v3.0 constructor completed');
+                console.log('✅ VoiceChat v4.0 with Fast Interruption System initialized');
+            }
+
+            // ✅ НОВАЯ СИСТЕМА ПЕРЕБИВАНИЯ
+            initializeInterruptionSystem() {
+                console.log('🔧 Initializing Fast Interruption System');
+                
+                this.interruptionState = {
+                    is_assistant_speaking: false,
+                    is_user_speaking: false,
+                    last_speech_start: 0,
+                    last_speech_stop: 0,
+                    interruption_count: 0,
+                    last_interruption_time: 0,
+                    current_audio_elements: [],
+                    pending_audio_stop: false,
+                    protection_time: 200 // мс защиты от дребезга
+                };
+                
+                // Определяем тип устройства для оптимизации
+                this.deviceInfo = {
+                    isIOS: /iPhone|iPad|iPod/i.test(navigator.userAgent),
+                    isAndroid: /Android/i.test(navigator.userAgent),
+                    isMobile: /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+                };
+                
+                // Настройки защиты от дребезга в зависимости от устройства
+                if (this.deviceInfo.isIOS) {
+                    this.interruptionState.protection_time = 150; // iOS быстрее
+                } else if (this.deviceInfo.isAndroid) {
+                    this.interruptionState.protection_time = 180; // Android средне
+                } else {
+                    this.interruptionState.protection_time = 200; // Desktop медленнее
+                }
+                
+                console.log(`🔧 Interruption system initialized for ${this.getDeviceType()}`);
+                console.log(`🛡️ Protection time: ${this.interruptionState.protection_time}ms`);
+            }
+
+            getDeviceType() {
+                if (this.deviceInfo.isIOS) return 'iOS';
+                if (this.deviceInfo.isAndroid) return 'Android';
+                if (this.deviceInfo.isMobile) return 'Mobile';
+                return 'Desktop';
+            }
+
+            // Быстрая обработка перебивания
+            async handleFastInterruption() {
+                const now = Date.now();
+                
+                // Защита от дребезга
+                if (now - this.interruptionState.last_interruption_time < this.interruptionState.protection_time) {
+                    console.log(`⚡ Игнорируем повторное перебивание (защита ${this.interruptionState.protection_time}мс)`);
+                    return;
+                }
+                
+                this.interruptionState.last_interruption_time = now;
+                this.interruptionState.interruption_count++;
+                
+                console.log(`⚡ БЫСТРОЕ перебивание #${this.interruptionState.interruption_count} на ${this.getDeviceType()}`);
+                
+                // Мгновенно останавливаем всё аудио
+                this.stopAllAudioImmediately();
+                
+                // Отправляем команду перебивания в ElevenLabs
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    try {
+                        this.ws.send(JSON.stringify({
+                            type: "interruption",
+                            timestamp: now
+                        }));
+                        
+                        console.log("📤 Команда перебивания отправлена в ElevenLabs");
+                    } catch (error) {
+                        console.error("❌ Ошибка отправки команды перебивания:", error);
+                    }
+                }
+                
+                // Обновляем UI
+                this.updateInterruptionUI();
+                
+                // Обновляем статистику
+                this.updateInterruptionStats();
+                
+                // Быстро возобновляем прослушивание
+                setTimeout(() => {
+                    if (!this.interruptionState.is_assistant_speaking) {
+                        this.resumeListeningAfterInterruption();
+                    }
+                }, this.deviceInfo.isIOS ? 100 : 150);
+            }
+
+            // Мгновенная остановка всего аудио
+            stopAllAudioImmediately() {
+                console.log("🛑 Мгновенная остановка всего аудио");
+                
+                // Очищаем очередь аудио
+                this.clearAudioQueue();
+                
+                // Останавливаем все активные аудио элементы
+                this.interruptionState.current_audio_elements.forEach(audio => {
+                    try {
+                        if (audio.pause) {
+                            audio.pause();
+                            audio.currentTime = 0;
+                        }
+                        if (audio.src && audio.src.startsWith('blob:')) {
+                            URL.revokeObjectURL(audio.src);
+                        }
+                    } catch (e) {
+                        console.warn("Ошибка остановки аудио:", e);
+                    }
+                });
+                
+                this.interruptionState.current_audio_elements = [];
+                this.interruptionState.is_assistant_speaking = false;
+                this.isAgentSpeaking = false;
+                this.isProcessingAudio = false;
+            }
+
+            // Обновление UI при перебивании
+            updateInterruptionUI() {
+                this.updateStatus('interrupted', `⚠️ Перебивание #${this.interruptionState.interruption_count}`);
+                
+                this.micAnimation.classList.remove('speaking', 'listening');
+                this.micAnimation.classList.add('interrupted');
+                
+                this.addMessage('system', `⚡ Перебивание #${this.interruptionState.interruption_count} (${this.getDeviceType()})`);
+            }
+
+            // Возобновление прослушивания после перебивания
+            resumeListeningAfterInterruption() {
+                console.log("🎤 Возобновление прослушивания после перебивания");
+                
+                this.interruptionState.is_user_speaking = true;
+                
+                // Убираем визуальные эффекты перебивания
+                this.micAnimation.classList.remove('interrupted');
+                this.micAnimation.classList.add('listening');
+                
+                // Возобновляем запись если соединение активно
+                if (this.isConnected && !this.isReconnecting) {
+                    setTimeout(() => {
+                        if (!this.isListening && !this.isProcessingAudio) {
+                            this.startListening();
+                        }
+                    }, 50);
+                }
+                
+                this.updateStatus('listening', '🟢 Слушаю после перебивания...');
+            }
+
+            // Обработка событий от ElevenLabs
+            handleElevenLabsInterruption(data) {
+                console.log("📥 Получено событие перебивания от ElevenLabs:", data);
+                
+                this.interruptionState.interruption_count = data.interruption_count || 
+                    (this.interruptionState.interruption_count + 1);
+                
+                this.stopAllAudioImmediately();
+                this.updateInterruptionUI();
+                this.updateInterruptionStats();
+                
+                // Автоматически возобновляем прослушивание
+                setTimeout(() => {
+                    this.resumeListeningAfterInterruption();
+                }, this.deviceInfo.isIOS ? 200 : 300);
+            }
+
+            // Определение начала речи пользователя (для превентивного перебивания)
+            detectUserSpeechStart(vadScore) {
+                const threshold = this.deviceInfo.isIOS ? 0.35 : 
+                                 this.deviceInfo.isAndroid ? 0.25 : 0.2;
+                
+                if (vadScore > threshold && !this.interruptionState.is_user_speaking) {
+                    this.interruptionState.is_user_speaking = true;
+                    this.interruptionState.last_speech_start = Date.now();
+                    
+                    // Если ассистент говорит - это перебивание
+                    if (this.interruptionState.is_assistant_speaking) {
+                        console.log("🗣️ Пользователь начал говорить - превентивное перебивание!");
+                        this.handleFastInterruption();
+                    }
+                } else if (vadScore <= threshold * 0.3 && this.interruptionState.is_user_speaking) {
+                    this.interruptionState.is_user_speaking = false;
+                    this.interruptionState.last_speech_stop = Date.now();
+                }
+            }
+
+            // Отслеживание состояния ассистента
+            setAssistantSpeaking(speaking, audioElement = null) {
+                this.interruptionState.is_assistant_speaking = speaking;
+                this.isAgentSpeaking = speaking;
+                
+                if (speaking && audioElement) {
+                    this.interruptionState.current_audio_elements.push(audioElement);
+                    console.log(`🗣️ Ассистент начал говорить (элементов: ${this.interruptionState.current_audio_elements.length})`);
+                } else if (!speaking) {
+                    console.log("🔇 Ассистент закончил говорить");
+                    
+                    // Автоматически возобновляем прослушивание
+                    setTimeout(() => {
+                        if (this.isConnected && !this.isReconnecting && !this.isListening) {
+                            this.startListening();
+                        }
+                    }, this.deviceInfo.isIOS ? 300 : 400);
+                }
+                
+                // Обновляем кнопку прерывания
+                this.updateInterruptButtonState();
+            }
+
+            // Обновление статистики перебиваний
+            updateInterruptionStats() {
+                const interruptionCount = document.getElementById('interruptionCount');
+                const protectionTime = document.getElementById('protectionTime');
+                const lastInterruption = document.getElementById('lastInterruption');
+                
+                if (interruptionCount) {
+                    interruptionCount.textContent = this.interruptionState.interruption_count;
+                }
+                
+                if (protectionTime) {
+                    protectionTime.textContent = this.interruptionState.protection_time;
+                }
+                
+                if (lastInterruption && this.interruptionState.last_interruption_time > 0) {
+                    const lastTime = new Date(this.interruptionState.last_interruption_time);
+                    lastInterruption.textContent = lastTime.toLocaleTimeString();
+                }
+            }
+
+            // Добавление кнопки ручного перебивания
+            addManualInterruptionButton() {
+                const interruptBtn = document.getElementById('interruptBtn');
+                if (interruptBtn && !interruptBtn.hasEventListener) {
+                    interruptBtn.addEventListener('click', () => {
+                        if (this.interruptionState.is_assistant_speaking) {
+                            this.handleFastInterruption();
+                        }
+                    });
+                    interruptBtn.hasEventListener = true;
+                    this.interruptBtn = interruptBtn;
+                }
+            }
+
+            // Обновление состояния кнопки прерывания
+            updateInterruptButtonState() {
+                if (this.interruptBtn) {
+                    this.interruptBtn.disabled = !this.interruptionState.is_assistant_speaking || !this.isConnected;
+                    
+                    if (this.interruptionState.is_assistant_speaking && this.isConnected) {
+                        this.interruptBtn.style.opacity = '1';
+                        this.interruptBtn.style.cursor = 'pointer';
+                        this.interruptBtn.textContent = '⚡ Прервать';
+                    } else {
+                        this.interruptBtn.style.opacity = '0.6';
+                        this.interruptBtn.style.cursor = 'not-allowed';
+                        this.interruptBtn.textContent = '⚡ Прервать';
+                    }
+                }
             }
 
             initializeElements() {
@@ -519,6 +830,7 @@
                 
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.interruptBtn = document.getElementById('interruptBtn');
                 this.diagnosticsBtn = document.getElementById('diagnosticsBtn');
                 this.status = document.getElementById('status');
                 this.chatArea = document.getElementById('chatArea');
@@ -533,6 +845,12 @@
                 this.bufferInfoSpan = document.getElementById('bufferInfo');
                 this.queueLengthSpan = document.getElementById('queueLength');
                 this.processingStatusSpan = document.getElementById('processingStatus');
+                this.deviceTypeSpan = document.getElementById('deviceType');
+
+                // Отображаем тип устройства
+                if (this.deviceTypeSpan) {
+                    this.deviceTypeSpan.textContent = this.getDeviceType();
+                }
 
                 if (this.connectBtn) {
                     this.connectBtn.addEventListener('click', () => {
@@ -555,14 +873,17 @@
                     });
                 }
 
+                // Добавляем обработчик для кнопки перебивания
+                this.addManualInterruptionButton();
+
                 console.log('✅ UI elements initialized');
             }
 
-            // ✅ НОВЫЕ обработчики настроек
             setupSettingsHandlers() {
                 const chunkDelaySelect = document.getElementById('chunkDelaySetting');
                 const queueSizeSelect = document.getElementById('queueSizeSetting');
                 const vadThresholdSelect = document.getElementById('vadThresholdSetting');
+                const protectionTimeSelect = document.getElementById('protectionTimeSetting');
 
                 if (chunkDelaySelect) {
                     chunkDelaySelect.addEventListener('change', (e) => {
@@ -584,9 +905,17 @@
                         console.log(`⚙️ VAD threshold updated: ${this.voiceActivityThreshold}`);
                     });
                 }
+
+                // ✅ НОВАЯ настройка защиты от дребезга
+                if (protectionTimeSelect) {
+                    protectionTimeSelect.addEventListener('change', (e) => {
+                        this.interruptionState.protection_time = parseInt(e.target.value);
+                        console.log(`⚙️ Protection time updated: ${this.interruptionState.protection_time}ms`);
+                        this.updateInterruptionStats();
+                    });
+                }
             }
 
-            // ✅ НОВЫЙ мониторинг очереди аудио
             startAudioQueueMonitoring() {
                 setInterval(() => {
                     if (this.queueLengthSpan) {
@@ -626,9 +955,11 @@
                         this.addMessage('system', `${overallIcon} Общий статус: ${data.overall.status} (${data.overall.health_score})`);
                     }
                     
-                    // ✅ Показываем статистику аудио
+                    // Показываем статистику аудио и перебиваний
                     const audioStats = this.getAudioQueueStats();
-                    this.addMessage('system', `🎵 Аудио статистика: Очередь: ${audioStats.queueLength}, Обработано: ${audioStats.processed}, Пропущено: ${audioStats.dropped}`);
+                    this.addMessage('system', `🎵 Аудио: Очередь: ${audioStats.queueLength}, Обработано: ${audioStats.processed}`);
+                    this.addMessage('system', `⚡ Перебивания: ${this.interruptionState.interruption_count}, Защита: ${this.interruptionState.protection_time}мс`);
+                    this.addMessage('system', `📱 Устройство: ${this.getDeviceType()}`);
                     
                     if (data.recommendations && data.recommendations.length > 0) {
                         this.addMessage('system', '💡 Рекомендации:');
@@ -663,6 +994,8 @@
                         }
                         this.addMessage('system', `✅ Агент готов (ID: ${this.agentId.substring(0, 8)}...)`);
                         this.addMessage('system', '🧠 LLM: Настроена в ElevenLabs Dashboard (GPT/Claude/Gemini)');
+                        this.addMessage('system', `⚡ Система быстрого перебивания активна для ${this.getDeviceType()}`);
+                        
                         if (this.connectBtn) {
                             this.connectBtn.disabled = false;
                             this.connectBtn.innerHTML = '🔗 Подключиться';
@@ -827,6 +1160,17 @@
                 
                 this.startKeepAlive();
                 this.startPingMonitoring();
+
+                // ✅ Сбрасываем счетчики перебивания для новой сессии
+                this.interruptionState.interruption_count = 0;
+                this.interruptionState.last_interruption_time = 0;
+                this.updateInterruptionStats();
+                
+                // Активируем кнопку прерывания
+                this.addManualInterruptionButton();
+                this.updateInterruptButtonState();
+                
+                console.log(`✅ Система перебивания готова для ${this.getDeviceType()}`);
             }
 
             startKeepAlive() {
@@ -895,7 +1239,8 @@
                             this.handleAudioResponse(data);
                             break;
                         case 'interruption':
-                            this.handleInterruption(data);
+                            // ✅ НОВАЯ обработка перебиваний
+                            this.handleElevenLabsInterruption(data);
                             break;
                         case 'ping':
                             this.handlePing(data);
@@ -947,7 +1292,7 @@
                 
                 this.addMessage('system', `✅ Разговор начат (ID: ${metadata.conversation_id.substring(0, 8)}...)`);
                 this.addMessage('system', '🎤 Начинайте говорить...');
-                this.addMessage('system', '🎵 Активирована система очереди аудио v3.0');
+                this.addMessage('system', '⚡ Активирована система быстрого перебивания v4.0');
                 
                 this.connectBtn.disabled = true;
                 this.disconnectBtn.disabled = false;
@@ -966,12 +1311,15 @@
                 const response = data.agent_response_event.agent_response;
                 this.addMessage('assistant', response);
                 
-                this.isAgentSpeaking = true;
-                this.updateStatus('speaking', '🎯 ИИ говорит...');
-                this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
-                this.micAnimation.classList.add('speaking');
-                
-                console.log('🗣️ Agent started speaking, pausing user recording');
+                // ✅ НОВАЯ обработка начала речи ассистента
+                if (!this.interruptionState.is_assistant_speaking) {
+                    this.setAssistantSpeaking(true);
+                    this.updateStatus('speaking', '🎯 ИИ говорит...');
+                    this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
+                    this.micAnimation.classList.add('speaking');
+                    
+                    console.log('🗣️ Agent started speaking, pausing user recording');
+                }
             }
 
             handleAgentResponseCorrection(data) {
@@ -986,14 +1334,20 @@
                 }
             }
 
-            // ✅ УЛУЧШЕННАЯ обработка аудио ответов с очередью
             handleAudioResponse(data) {
                 try {
                     const audioBase64 = data.audio_event.audio_base_64;
                     
                     console.log('🔊 Received audio chunk from agent, adding to queue');
                     
-                    // ✅ Добавляем в очередь вместо немедленного воспроизведения
+                    // ✅ НОВАЯ обработка начала аудио
+                    if (!this.interruptionState.is_assistant_speaking) {
+                        this.setAssistantSpeaking(true);
+                        this.updateStatus('speaking', '🎯 ИИ говорит...');
+                        this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
+                        this.micAnimation.classList.add('speaking');
+                    }
+                    
                     this.addToAudioQueue(audioBase64);
                     
                 } catch (error) {
@@ -1002,264 +1356,12 @@
                 }
             }
 
-            // ✅ НОВАЯ система очереди аудио
-            addToAudioQueue(audioBase64) {
-                // Проверяем размер очереди
-                if (this.audioQueue.length >= this.settings.maxQueueSize) {
-                    console.warn('🚨 Audio queue full, dropping oldest chunk');
-                    this.audioQueue.shift();
-                    this.audioQueueStats.dropped++;
-                }
-                
-                this.audioQueue.push(audioBase64);
-                
-                // Запускаем обработку если не активна
-                if (!this.isProcessingAudio) {
-                    this.processAudioQueue();
-                }
-            }
-
-            // ✅ НОВАЯ обработка очереди аудио
-            async processAudioQueue() {
-                if (this.isProcessingAudio || this.audioQueue.length === 0) {
-                    return;
-                }
-                
-                this.isProcessingAudio = true;
-                console.log(`🎵 Processing audio queue, ${this.audioQueue.length} chunks pending`);
-                
-                while (this.audioQueue.length > 0 && this.isConnected) {
-                    const audioBase64 = this.audioQueue.shift();
-                    
-                    try {
-                        await this.playAudioChunk(audioBase64);
-                        this.audioQueueStats.processed++;
-                        
-                        // ✅ Пауза между чанками для плавности
-                        if (this.audioQueue.length > 0) {
-                            await this.delay(this.settings.audioChunkDelay);
-                        }
-                        
-                    } catch (error) {
-                        console.error('Error playing audio chunk:', error);
-                        this.handleAudioError();
-                        break;
-                    }
-                }
-                
-                this.isProcessingAudio = false;
-                
-                // ✅ Возобновляем прослушивание когда очередь пуста
-                if (this.audioQueue.length === 0 && this.isConnected && this.isAgentSpeaking) {
-                    console.log('🔊 Audio queue finished, resuming listening');
-                    this.resumeListening();
-                }
-            }
-
-            // ✅ УЛУЧШЕННОЕ воспроизведение одного чанка
-            async playAudioChunk(audioBase64) {
-                return new Promise((resolve, reject) => {
-                    try {
-                        const audioData = atob(audioBase64);
-                        const pcmArray = new Uint8Array(audioData.length);
-                        
-                        for (let i = 0; i < audioData.length; i++) {
-                            pcmArray[i] = audioData.charCodeAt(i);
-                        }
-
-                        const wavBlob = this.createWavBlob(pcmArray, 16000, 1, 16);
-                        const audioUrl = URL.createObjectURL(wavBlob);
-                        
-                        if (this.audioContext && this.audioContext.state !== 'closed') {
-                            this.playWithWebAudio(audioUrl, resolve, reject);
-                        } else {
-                            this.playWithHtmlAudio(audioUrl, resolve, reject);
-                        }
-
-                    } catch (error) {
-                        console.error('Error processing audio chunk:', error);
-                        reject(error);
-                    }
-                });
-            }
-
-            // ✅ УЛУЧШЕННОЕ Web Audio воспроизведение
-            async playWithWebAudio(audioUrl, resolve, reject) {
-                try {
-                    const response = await fetch(audioUrl);
-                    const arrayBuffer = await response.arrayBuffer();
-                    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-                    
-                    const source = this.audioContext.createBufferSource();
-                    source.buffer = audioBuffer;
-                    
-                    // ✅ Добавляем gain node для контроля громкости и fade эффектов
-                    const gainNode = this.audioContext.createGain();
-                    source.connect(gainNode);
-                    gainNode.connect(this.audioContext.destination);
-                    
-                    // ✅ Плавное появление звука
-                    gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
-                    gainNode.gain.linearRampToValueAtTime(1, this.audioContext.currentTime + this.settings.fadeInDuration / 1000);
-                    
-                    // ✅ Останавливаем предыдущий источник если есть
-                    if (this.currentAudioSource) {
-                        try {
-                            this.currentAudioSource.stop();
-                        } catch (e) {
-                            // Источник уже остановлен
-                        }
-                    }
-                    
-                    this.currentAudioSource = source;
-                    
-                    source.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
-                        this.currentAudioSource = null;
-                        resolve();
-                    };
-                    
-                    source.onerror = (error) => {
-                        URL.revokeObjectURL(audioUrl);
-                        this.currentAudioSource = null;
-                        reject(error);
-                    };
-                    
-                    source.start();
-                    console.log('🔊 Playing audio chunk via Web Audio API with fade-in');
-                    
-                } catch (error) {
-                    URL.revokeObjectURL(audioUrl);
-                    console.warn('Web Audio failed, falling back to HTML5:', error);
-                    this.playWithHtmlAudio(audioUrl, resolve, reject);
-                }
-            }
-
-            // ✅ УЛУЧШЕННОЕ HTML5 аудио fallback
-            playWithHtmlAudio(audioUrl, resolve, reject) {
-                const audio = new Audio(audioUrl);
-                audio.volume = 0.8; // Немного тише для комфорта
-                
-                audio.onended = () => {
-                    URL.revokeObjectURL(audioUrl);
-                    resolve();
-                };
-                
-                audio.onerror = (error) => {
-                    URL.revokeObjectURL(audioUrl);
-                    reject(error);
-                };
-                
-                audio.play().catch(error => {
-                    URL.revokeObjectURL(audioUrl);
-                    reject(error);
-                });
-                
-                console.log('🔊 Playing audio chunk via HTML5 audio (fallback)');
-            }
-
-            // ✅ НОВАЯ функция задержки
-            delay(ms) {
-                return new Promise(resolve => setTimeout(resolve, ms));
-            }
-
-            // ✅ УЛУЧШЕННОЕ возобновление прослушивания
-            resumeListening() {
-                setTimeout(() => {
-                    if (this.isConnected && !this.isProcessingAudio && this.audioQueue.length === 0) {
-                        this.isAgentSpeaking = false;
-                        this.updateStatus('listening', '🟢 Слушаю...');
-                        this.micAnimation.classList.remove('recording', 'speaking');
-                        this.micAnimation.classList.add('listening');
-                        console.log('🎤 Resumed listening after agent finished speaking');
-                    }
-                }, this.settings.resumeListeningDelay);
-            }
-
-            // ✅ УЛУЧШЕННАЯ обработка прерываний
-            handleInterruption(data) {
-                console.log('⚠️ Interruption detected:', data);
-                
-                // ✅ Немедленно очищаем очередь аудио
-                this.clearAudioQueue();
-                
-                this.isAgentSpeaking = false;
-                this.updateStatus('interrupted', '⚠️ Прервано');
-                this.micAnimation.classList.remove('speaking', 'listening');
-                this.micAnimation.classList.add('interrupted');
-                
-                this.addMessage('system', '⚠️ Разговор прерван - продолжайте говорить');
-                
-                setTimeout(() => {
-                    if (this.isConnected && !this.isAgentSpeaking) {
-                        this.updateStatus('listening', '🟢 Слушаю...');
-                        this.micAnimation.classList.remove('interrupted');
-                        this.micAnimation.classList.add('listening');
-                        console.log('🎤 Resumed listening after interruption');
-                    }
-                }, this.settings.interruptionDelay);
-            }
-
-            // ✅ НОВАЯ очистка очереди аудио
-            clearAudioQueue() {
-                console.log('🧹 Clearing audio queue');
-                this.audioQueue = [];
-                this.isProcessingAudio = false;
-                
-                if (this.currentAudioSource) {
-                    try {
-                        this.currentAudioSource.stop();
-                        this.currentAudioSource = null;
-                    } catch (error) {
-                        console.log('Audio source already stopped:', error);
-                    }
-                }
-                
-                if (this.audioChunkTimeout) {
-                    clearTimeout(this.audioChunkTimeout);
-                    this.audioChunkTimeout = null;
-                }
-            }
-
-            // ✅ УЛУЧШЕННАЯ обработка ошибок аудио
-            handleAudioError() {
-                console.warn('🚨 Audio error, clearing queue and resuming');
-                this.clearAudioQueue();
-                
-                if (this.isConnected) {
-                    this.resumeListening();
-                }
-            }
-
-            handlePing(data) {
-                const pongMessage = {
-                    type: "pong",
-                    event_id: data.ping_event.event_id
-                };
-                
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify(pongMessage));
-                    
-                    if (this.lastPingTime) {
-                        const pingTime = Date.now() - this.lastPingTime;
-                        this.pingTimeSpan.textContent = pingTime;
-                    }
-                }
-                
-                console.log('🏓 Ping received, pong sent');
-            }
-
-            handlePong(data) {
-                if (this.lastPingTime) {
-                    const pingTime = Date.now() - this.lastPingTime;
-                    this.pingTimeSpan.textContent = pingTime;
-                    console.log(`🏓 Pong received, RTT: ${pingTime}ms`);
-                }
-            }
-
             handleVadScore(data) {
                 this.vadScore = data.vad_score_event.vad_score;
                 this.vadScoreSpan.textContent = this.vadScore.toFixed(2);
+                
+                // ✅ НОВАЯ обработка VAD для превентивного перебивания
+                this.detectUserSpeechStart(this.vadScore);
                 
                 const percentage = this.vadScore * 100;
                 this.volumeBar.style.width = percentage + '%';
@@ -1316,6 +1418,32 @@
                 }
             }
 
+            handlePing(data) {
+                const pongMessage = {
+                    type: "pong",
+                    event_id: data.ping_event.event_id
+                };
+                
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(pongMessage));
+                    
+                    if (this.lastPingTime) {
+                        const pingTime = Date.now() - this.lastPingTime;
+                        this.pingTimeSpan.textContent = pingTime;
+                    }
+                }
+                
+                console.log('🏓 Ping received, pong sent');
+            }
+
+            handlePong(data) {
+                if (this.lastPingTime) {
+                    const pingTime = Date.now() - this.lastPingTime;
+                    this.pingTimeSpan.textContent = pingTime;
+                    console.log(`🏓 Pong received, RTT: ${pingTime}ms`);
+                }
+            }
+
             onWebSocketClose(event) {
                 const code = event?.code || 'unknown';
                 const reason = event?.reason || 'unknown';
@@ -1327,6 +1455,11 @@
                 this.disconnectBtn.disabled = true;
                 this.connectionStateSpan.textContent = 'Отключен';
                 this.micAnimation.classList.remove('recording', 'listening', 'interrupted', 'speaking');
+
+                // ✅ Сбрасываем состояние перебиваний
+                this.interruptionState.is_assistant_speaking = false;
+                this.interruptionState.is_user_speaking = false;
+                this.updateInterruptButtonState();
 
                 let statusMessage = '🔴 Отключен';
                 let systemMessage = '🔌 Соединение закрыто';
@@ -1381,6 +1514,246 @@
                 this.connectionStateSpan.textContent = 'Ошибка';
                 this.connectBtn.disabled = false;
                 this.disconnectBtn.disabled = true;
+            }
+
+            // ✅ УЛУЧШЕННАЯ система очереди аудио остается той же
+            addToAudioQueue(audioBase64) {
+                if (this.audioQueue.length >= this.settings.maxQueueSize) {
+                    console.warn('🚨 Audio queue full, dropping oldest chunk');
+                    this.audioQueue.shift();
+                    this.audioQueueStats.dropped++;
+                }
+                
+                this.audioQueue.push(audioBase64);
+                
+                if (!this.isProcessingAudio) {
+                    this.processAudioQueue();
+                }
+            }
+
+            async processAudioQueue() {
+                if (this.isProcessingAudio || this.audioQueue.length === 0) {
+                    return;
+                }
+                
+                this.isProcessingAudio = true;
+                console.log(`🎵 Processing audio queue, ${this.audioQueue.length} chunks pending`);
+                
+                while (this.audioQueue.length > 0 && this.isConnected) {
+                    const audioBase64 = this.audioQueue.shift();
+                    
+                    try {
+                        await this.playAudioChunk(audioBase64);
+                        this.audioQueueStats.processed++;
+                        
+                        if (this.audioQueue.length > 0) {
+                            await this.delay(this.settings.audioChunkDelay);
+                        }
+                        
+                    } catch (error) {
+                        console.error('Error playing audio chunk:', error);
+                        this.handleAudioError();
+                        break;
+                    }
+                }
+                
+                this.isProcessingAudio = false;
+                
+                // ✅ НОВАЯ обработка завершения аудио
+                if (this.audioQueue.length === 0 && this.isConnected && this.interruptionState.is_assistant_speaking) {
+                    console.log('🔊 Audio queue finished, assistant finished speaking');
+                    this.setAssistantSpeaking(false);
+                    this.resumeListening();
+                }
+            }
+
+            async playAudioChunk(audioBase64) {
+                return new Promise((resolve, reject) => {
+                    try {
+                        const audioData = atob(audioBase64);
+                        const pcmArray = new Uint8Array(audioData.length);
+                        
+                        for (let i = 0; i < audioData.length; i++) {
+                            pcmArray[i] = audioData.charCodeAt(i);
+                        }
+
+                        const wavBlob = this.createWavBlob(pcmArray, 16000, 1, 16);
+                        const audioUrl = URL.createObjectURL(wavBlob);
+                        
+                        if (this.audioContext && this.audioContext.state !== 'closed') {
+                            this.playWithWebAudio(audioUrl, resolve, reject);
+                        } else {
+                            this.playWithHtmlAudio(audioUrl, resolve, reject);
+                        }
+
+                    } catch (error) {
+                        console.error('Error processing audio chunk:', error);
+                        reject(error);
+                    }
+                });
+            }
+
+            async playWithWebAudio(audioUrl, resolve, reject) {
+                try {
+                    const response = await fetch(audioUrl);
+                    const arrayBuffer = await response.arrayBuffer();
+                    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                    
+                    const source = this.audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    
+                    const gainNode = this.audioContext.createGain();
+                    source.connect(gainNode);
+                    gainNode.connect(this.audioContext.destination);
+                    
+                    gainNode.gain.setValueAtTime(0, this.audioContext.currentTime);
+                    gainNode.gain.linearRampToValueAtTime(1, this.audioContext.currentTime + this.settings.fadeInDuration / 1000);
+                    
+                    // ✅ НОВАЯ регистрация аудио элемента
+                    const audioWrapper = {
+                        pause: () => {
+                            try { source.stop(); } catch (e) { /* уже остановлен */ }
+                        },
+                        currentTime: 0,
+                        src: audioUrl
+                    };
+                    
+                    this.setAssistantSpeaking(true, audioWrapper);
+                    
+                    if (this.currentAudioSource) {
+                        try {
+                            this.currentAudioSource.stop();
+                        } catch (e) {
+                            // Источник уже остановлен
+                        }
+                    }
+                    
+                    this.currentAudioSource = source;
+                    
+                    source.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        this.currentAudioSource = null;
+                        
+                        // ✅ НОВАЯ очистка из отслеживания
+                        const index = this.interruptionState.current_audio_elements.indexOf(audioWrapper);
+                        if (index > -1) {
+                            this.interruptionState.current_audio_elements.splice(index, 1);
+                        }
+                        
+                        resolve();
+                    };
+                    
+                    source.onerror = (error) => {
+                        URL.revokeObjectURL(audioUrl);
+                        this.currentAudioSource = null;
+                        
+                        const index = this.interruptionState.current_audio_elements.indexOf(audioWrapper);
+                        if (index > -1) {
+                            this.interruptionState.current_audio_elements.splice(index, 1);
+                        }
+                        
+                        reject(error);
+                    };
+                    
+                    source.start();
+                    console.log('🔊 Playing audio chunk via Web Audio API with interruption tracking');
+                    
+                } catch (error) {
+                    URL.revokeObjectURL(audioUrl);
+                    console.warn('Web Audio failed, falling back to HTML5:', error);
+                    this.playWithHtmlAudio(audioUrl, resolve, reject);
+                }
+            }
+
+            playWithHtmlAudio(audioUrl, resolve, reject) {
+                const audio = new Audio(audioUrl);
+                audio.volume = 0.8;
+                
+                // ✅ НОВАЯ регистрация HTML5 аудио элемента
+                this.setAssistantSpeaking(true, audio);
+                
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    
+                    const index = this.interruptionState.current_audio_elements.indexOf(audio);
+                    if (index > -1) {
+                        this.interruptionState.current_audio_elements.splice(index, 1);
+                    }
+                    
+                    resolve();
+                };
+                
+                audio.onerror = (error) => {
+                    URL.revokeObjectURL(audioUrl);
+                    
+                    const index = this.interruptionState.current_audio_elements.indexOf(audio);
+                    if (index > -1) {
+                        this.interruptionState.current_audio_elements.splice(index, 1);
+                    }
+                    
+                    reject(error);
+                };
+                
+                audio.play().catch(error => {
+                    URL.revokeObjectURL(audioUrl);
+                    
+                    const index = this.interruptionState.current_audio_elements.indexOf(audio);
+                    if (index > -1) {
+                        this.interruptionState.current_audio_elements.splice(index, 1);
+                    }
+                    
+                    reject(error);
+                });
+                
+                console.log('🔊 Playing audio chunk via HTML5 audio (fallback)');
+            }
+
+            delay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            // ✅ УЛУЧШЕННОЕ возобновление прослушивания
+            resumeListening() {
+                setTimeout(() => {
+                    if (this.isConnected && !this.isProcessingAudio && this.audioQueue.length === 0) {
+                        this.setAssistantSpeaking(false);
+                        
+                        this.updateStatus('listening', '🟢 Слушаю...');
+                        this.micAnimation.classList.remove('recording', 'speaking');
+                        this.micAnimation.classList.add('listening');
+                        console.log('🎤 Resumed listening after agent finished speaking');
+                    }
+                }, this.settings.resumeListeningDelay);
+            }
+
+            // ✅ НОВАЯ очистка очереди аудио
+            clearAudioQueue() {
+                console.log('🧹 Clearing audio queue');
+                this.audioQueue = [];
+                this.isProcessingAudio = false;
+                
+                if (this.currentAudioSource) {
+                    try {
+                        this.currentAudioSource.stop();
+                        this.currentAudioSource = null;
+                    } catch (error) {
+                        console.log('Audio source already stopped:', error);
+                    }
+                }
+                
+                if (this.audioChunkTimeout) {
+                    clearTimeout(this.audioChunkTimeout);
+                    this.audioChunkTimeout = null;
+                }
+            }
+
+            handleAudioError() {
+                console.warn('🚨 Audio error, clearing queue and resuming');
+                this.clearAudioQueue();
+                
+                if (this.isConnected) {
+                    this.resumeListening();
+                }
             }
 
             createWavBlob(pcmArray, sampleRate, numChannels, bitsPerSample) {
@@ -1472,7 +1845,7 @@
                     this.updateStatus('listening', '🟢 Слушаю...');
                     
                     if (this.audioSystemSpan) {
-                        this.audioSystemSpan.textContent = 'AudioContext (PCM 16kHz) + Queue v3.0';
+                        this.audioSystemSpan.textContent = `AudioContext (PCM 16kHz) + Interruption v4.0`;
                     }
                     if (this.bufferInfoSpan) {
                         this.bufferInfoSpan.textContent = `${this.audioContext.sampleRate}Hz, 4096 samples`;
@@ -1608,7 +1981,6 @@
             stopRecording() {
                 console.log('🛑 Stopping audio recording...');
                 
-                // ✅ Очищаем аудио очередь
                 this.clearAudioQueue();
                 
                 if (this.audioProcessor) {
@@ -1689,6 +2061,11 @@
                 this.conversationId = null;
                 this.vadScore = 0;
                 
+                // ✅ Сбрасываем состояние перебиваний
+                this.interruptionState.is_assistant_speaking = false;
+                this.interruptionState.is_user_speaking = false;
+                this.updateInterruptButtonState();
+                
                 if (this.vadScoreSpan) {
                     this.vadScoreSpan.textContent = '0.00';
                 }
@@ -1706,8 +2083,18 @@
             updateStatus(className, text) {
                 if (this.status) {
                     this.status.className = `status ${className}`;
-                    this.status.textContent = text;
+                    
+                    // ✅ НОВАЯ статистика перебиваний в статусе
+                    let statusText = text;
+                    if (this.interruptionState.interruption_count > 0) {
+                        statusText += ` (Перебиваний: ${this.interruptionState.interruption_count})`;
+                    }
+                    
+                    this.status.textContent = statusText;
                 }
+                
+                // Обновляем состояние кнопки прерывания
+                this.updateInterruptButtonState();
             }
 
             addMessage(type, content) {
@@ -1721,13 +2108,11 @@
                 }
             }
 
-            // ✅ НОВЫЕ настройки качества
             updateAudioSettings(newSettings) {
                 this.settings = { ...this.settings, ...newSettings };
                 console.log('⚙️ Audio settings updated:', this.settings);
             }
 
-            // ✅ НОВАЯ функция получения статистики
             getAudioQueueStats() {
                 return {
                     queueLength: this.audioQueue.length,
@@ -1735,16 +2120,20 @@
                     isAgentSpeaking: this.isAgentSpeaking,
                     currentSettings: this.settings,
                     processed: this.audioQueueStats.processed,
-                    dropped: this.audioQueueStats.dropped
+                    dropped: this.audioQueueStats.dropped,
+                    // ✅ НОВАЯ статистика перебиваний
+                    interruptions: this.interruptionState.interruption_count,
+                    protectionTime: this.interruptionState.protection_time,
+                    deviceType: this.getDeviceType()
                 };
             }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            console.log('🚀 DOM loaded, initializing VoiceChat v3.0...');
+            console.log('🚀 DOM loaded, initializing VoiceChat v4.0 with Fast Interruption System...');
             try {
                 window.voiceChat = new VoiceChat();
-                console.log('✅ VoiceChat v3.0 initialized successfully');
+                console.log('✅ VoiceChat v4.0 with Fast Interruption System initialized successfully');
             } catch (error) {
                 console.error('❌ Failed to initialize VoiceChat:', error);
             }
