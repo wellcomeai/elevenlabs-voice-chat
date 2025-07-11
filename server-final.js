@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(express.static('.'));
 
 // ElevenLabs configuration
-const ELEVENLABS_API_KEY = 'sk_29b8a29eb2a7e8a62521a36d7c3c34c245d0ca0daaded3da';
+const ELEVENLABS_API_KEY = 'sk_95a5725ca01fdba20e15bd662d8b76152971016ff045377f';
 const AGENT_ID = 'agent_01jzwcew2ferttga9m1zcn3js1';
 
 console.log(`🎯 Server starting with Agent ID: ${AGENT_ID}`);
