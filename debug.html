@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug - ElevenLabs Voice Chat</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .status-card {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .status-ok { border-left: 4px solid #00ff00; }
+        .status-error { border-left: 4px solid #ff0000; }
+        .status-warning { border-left: 4px solid #ffaa00; }
+        .code {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre;
+        }
+        button {
+            background: #444;
+            color: #00ff00;
+            border: 1px solid #666;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #555;
+        }
+        .log {
+            background: #000;
+            color: #ccc;
+            padding: 15px;
+            border-radius: 4px;
+            height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .timestamp {
+            color: #888;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 ElevenLabs Voice Chat - Debug Panel</h1>
+        
+        <div class="status-card status-warning">
+            <h2>📊 System Status</h2>
+            <div id="systemStatus">Loading...</div>
+        </div>
+
+        <div class="status-card">
+            <h2>🤖 Agent Status</h2>
+            <div id="agentStatus">Loading...</div>
+            <button onclick="retryAgent()">🔄 Retry Agent Creation</button>
+            <button onclick="checkHealth()">🩺 Check Health</button>
+        </div>
+
+        <div class="status-card">
+            <h2>🔑 API Configuration</h2>
+            <div id="apiConfig">Loading...</div>
+        </div>
+
+        <div class="status-card">
+            <h2>🌐 WebSocket Test</h2>
+            <div id="websocketStatus">Not tested</div>
+            <button onclick="testWebSocket()">🧪 Test WebSocket</button>
+        </div>
+
+        <div class="status-card">
+            <h2>📋 Debug Log</h2>
+            <div class="log" id="debugLog">
+                <div class="timestamp">[INFO] Debug panel loaded</div>
+            </div>
+            <button onclick="clearLog()">🗑️ Clear Log</button>
+            <button onclick="downloadLog()">💾 Download Log</button>
+        </div>
+
+        <div class="status-card">
+            <h2>🛠️ Quick Actions</h2>
+            <button onclick="location.href='/'">🏠 Go to Main App</button>
+            <button onclick="location.reload()">🔄 Refresh Debug Panel</button>
+            <button onclick="showRawConfig()">📄 Show Raw Config</button>
+        </div>
+    </div>
+
+    <script>
+        let debugLog = [];
+
+        function log(level, message) {
+            const timestamp = new Date().toISOString();
+            const logEntry = `[${timestamp}] [${level}] ${message}`;
+            debugLog.push(logEntry);
+            
+            const logElement = document.getElementById('debugLog');
+            const div = document.createElement('div');
+            div.innerHTML = `<span class="timestamp">[${level}]</span> ${message}`;
+            logElement.appendChild(div);
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        async function checkHealth() {
+            log('INFO', 'Checking server health...');
+            
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                log('SUCCESS', `Health check: ${response.status}`);
+                log('DATA', JSON.stringify(data, null, 2));
+                
+                updateSystemStatus(data);
+                updateAgentStatus(data);
+                
+            } catch (error) {
+                log('ERROR', `Health check failed: ${error.message}`);
+                updateSystemStatus({ status: 'ERROR', error: error.message });
+            }
+        }
+
+        async function retryAgent() {
+            log('INFO', 'Retrying agent creation...');
+            
+            try {
+                const response = await fetch('/api/retry-agent', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    log('SUCCESS', `Agent created: ${data.agent_id}`);
+                } else {
+                    log('ERROR', `Agent creation failed: ${data.error}`);
+                }
+                
+                // Refresh status
+                setTimeout(checkHealth, 1000);
+                
+            } catch (error) {
+                log('ERROR', `Retry request failed: ${error.message}`);
+            }
+        }
+
+        async function testWebSocket() {
+            log('INFO', 'Testing WebSocket connection...');
+            
+            try {
+                // First get agent config
+                const configResponse = await fetch('/api/agent-id');
+                const config = await configResponse.json();
+                
+                if (!config.agent_id) {
+                    throw new Error('No agent ID available');
+                }
+                
+                const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${config.agent_id}`;
+                log('INFO', `Connecting to: ${wsUrl}`);
+                
+                const ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    log('SUCCESS', 'WebSocket connected successfully');
+                    document.getElementById('websocketStatus').innerHTML = 
+                        '<span style="color: #00ff00;">✅ WebSocket OK</span>';
+                    ws.close();
+                };
+                
+                ws.onerror = (error) => {
+                    log('ERROR', `WebSocket error: ${error}`);
+                    document.getElementById('websocketStatus').innerHTML = 
+                        '<span style="color: #ff0000;">❌ WebSocket Failed</span>';
+                };
+                
+                ws.onclose = () => {
+                    log('INFO', 'WebSocket connection closed');
+                };
+                
+                // Close after 5 seconds if still open
+                setTimeout(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.close();
+                        log('INFO', 'WebSocket test completed');
+                    }
+                }, 5000);
+                
+            } catch (error) {
+                log('ERROR', `WebSocket test failed: ${error.message}`);
+                document.getElementById('websocketStatus').innerHTML = 
+                    '<span style="color: #ff0000;">❌ Test Failed</span>';
+            }
+        }
+
+        function updateSystemStatus(data) {
+            const element = document.getElementById('systemStatus');
+            const status = data.status || 'UNKNOWN';
+            
+            element.innerHTML = `
+                <div><strong>Server Status:</strong> ${status}</div>
+                <div><strong>Timestamp:</strong> ${data.timestamp || 'N/A'}</div>
+                <div><strong>Message:</strong> ${data.message || 'N/A'}</div>
+            `;
+        }
+
+        function updateAgentStatus(data) {
+            const element = document.getElementById('agentStatus');
+            const ready = data.agent_ready || false;
+            const agentId = data.agent_id || 'None';
+            const error = data.agent_error || 'None';
+            
+            const statusColor = ready ? '#00ff00' : '#ff0000';
+            const statusText = ready ? 'READY' : 'NOT READY';
+            
+            element.innerHTML = `
+                <div><strong>Status:</strong> <span style="color: ${statusColor};">${statusText}</span></div>
+                <div><strong>Agent ID:</strong> ${agentId}</div>
+                <div><strong>Error:</strong> ${error}</div>
+            `;
+            
+            updateApiConfig();
+        }
+
+        function updateApiConfig() {
+            const element = document.getElementById('apiConfig');
+            element.innerHTML = `
+                <div><strong>API Endpoint:</strong> api.elevenlabs.io</div>
+                <div><strong>API Key:</strong> sk_29b8a...daaded3da (configured)</div>
+                <div><strong>WebSocket URL:</strong> wss://api.elevenlabs.io/v1/convai/conversation</div>
+                <div class="code">curl -H "xi-api-key: YOUR_KEY" https://api.elevenlabs.io/v1/user</div>
+            `;
+        }
+
+        async function showRawConfig() {
+            try {
+                const response = await fetch('/api/agent-id');
+                const data = await response.json();
+                
+                log('DATA', 'Raw agent config:');
+                log('DATA', JSON.stringify(data, null, 2));
+                
+            } catch (error) {
+                log('ERROR', `Failed to get raw config: ${error.message}`);
+            }
+        }
+
+        function clearLog() {
+            debugLog = [];
+            document.getElementById('debugLog').innerHTML = 
+                '<div class="timestamp">[INFO] Log cleared</div>';
+        }
+
+        function downloadLog() {
+            const logText = debugLog.join('\n');
+            const blob = new Blob([logText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `elevenlabs-debug-${new Date().toISOString()}.log`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            log('INFO', 'Debug log downloaded');
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(checkHealth, 30000);
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', () => {
+            log('INFO', 'Debug panel initialized');
+            checkHealth();
+        });
+    </script>
+</body>
+</html>
