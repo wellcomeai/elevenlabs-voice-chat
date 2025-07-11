@@ -313,6 +313,16 @@
             text-align: left;
         }
 
+        .audio-debug {
+            margin: 0.5rem 0;
+            font-size: 0.75rem;
+            color: #888;
+            text-align: left;
+            background: #f8f9fa;
+            padding: 0.5rem;
+            border-radius: 4px;
+        }
+
         @media (max-width: 600px) {
             .container {
                 margin: 1rem;
@@ -333,7 +343,7 @@
     <div class="container">
         <div class="header">
             <h1 class="title">🎤 ИИ Голосовой Помощник</h1>
-            <p class="subtitle">Powered by ElevenLabs Conversational AI</p>
+            <p class="subtitle">Powered by ElevenLabs Conversational AI v2.0</p>
         </div>
 
         <div id="status" class="status disconnected">
@@ -376,6 +386,12 @@
             <div>Статус: <span id="connectionState">Отключен</span></div>
         </div>
 
+        <div class="audio-debug" id="audioDebug">
+            <div>Аудио система: <span id="audioSystem">Инициализация...</span></div>
+            <div>Формат: <span id="audioFormat">PCM 16kHz</span></div>
+            <div>Буфер: <span id="bufferInfo">4096 samples</span></div>
+        </div>
+
         <div class="chat-area" id="chatArea">
             <div class="message system">
                 Нажмите "Подключиться" чтобы начать разговор с ИИ помощником
@@ -385,12 +401,11 @@
         <div class="footer">
             <p>🎯 Говорите естественно • 🎧 Используйте наушники для лучшего качества</p>
             <p>Agent ID: <span id="agentId">Загрузка...</span></p>
-            <p>Audio Format: <span id="audioFormat">PCM 16kHz</span></p>
             <p style="margin-top: 0.5rem; font-size: 0.8rem; color: #888;">
                 💡 При проблемах с подключением нажмите "Диагностика"
             </p>
             <p style="margin-top: 0.25rem; font-size: 0.75rem; color: #999;">
-                v2.0 • Улучшенная стабильность соединения • Автоматическое переподключение • Keep-alive мониторинг
+                v2.1 • Исправленный PCM аудио формат • Улучшенная диагностика • Стабильное соединение
             </p>
         </div>
     </div>
@@ -404,17 +419,19 @@
                 this.mediaRecorder = null;
                 this.audioStream = null;
                 this.audioContext = null;
+                this.audioProcessor = null;
+                this.audioSource = null;
                 this.agentId = null;
                 this.conversationId = null;
                 this.initializationTimeout = null;
                 
-                // Audio settings
-                this.chunkInterval = 250; // 250ms согласно документации
-                this.recordingTimer = null;
+                // Audio settings - ✅ ИСПРАВЛЕНО для PCM формата
+                this.chunkInterval = 250;
                 this.audioQueue = [];
                 this.isAgentSpeaking = false;
+                this.currentVolume = 0;
                 
-                // Connection management согласно документации
+                // Connection management
                 this.keepAliveInterval = null;
                 this.lastActivityTime = Date.now();
                 this.connectionRetryCount = 0;
@@ -426,6 +443,14 @@
                 
                 // VAD (Voice Activity Detection)
                 this.vadScore = 0;
+                
+                // Audio diagnostics
+                this.audioDebugInfo = {
+                    system: 'Не инициализировано',
+                    sampleRate: 0,
+                    bufferSize: 0,
+                    chunksPerSecond: 0
+                };
                 
                 this.initializeElements();
                 this.loadAgentConfig();
@@ -444,7 +469,9 @@
                 this.chunkIntervalInput = document.getElementById('chunkInterval');
                 this.pingTimeSpan = document.getElementById('pingTime');
                 this.connectionStateSpan = document.getElementById('connectionState');
+                this.audioSystemSpan = document.getElementById('audioSystem');
                 this.audioFormatSpan = document.getElementById('audioFormat');
+                this.bufferInfoSpan = document.getElementById('bufferInfo');
 
                 this.connectBtn.addEventListener('click', () => this.connect());
                 this.disconnectBtn.addEventListener('click', () => this.disconnect());
@@ -454,6 +481,46 @@
                     this.chunkInterval = parseInt(e.target.value);
                     this.restartRecording();
                 });
+
+                // ✅ НОВАЯ диагностика аудио при загрузке
+                this.diagnoseAudioCapabilities();
+            }
+
+            // ✅ НОВАЯ функция диагностики аудио возможностей
+            async diagnoseAudioCapabilities() {
+                const diagnostics = {
+                    audioContext: !!(window.AudioContext || window.webkitAudioContext),
+                    mediaRecorder: !!window.MediaRecorder,
+                    getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+                    supportedFormats: []
+                };
+
+                if (window.MediaRecorder) {
+                    const formats = [
+                        'audio/webm;codecs=opus',
+                        'audio/webm',
+                        'audio/ogg;codecs=opus',
+                        'audio/wav'
+                    ];
+                    
+                    formats.forEach(format => {
+                        if (MediaRecorder.isTypeSupported(format)) {
+                            diagnostics.supportedFormats.push(format);
+                        }
+                    });
+                }
+
+                let systemStatus = 'Неизвестно';
+                if (diagnostics.audioContext && diagnostics.getUserMedia) {
+                    systemStatus = 'AudioContext + getUserMedia (Оптимально)';
+                } else if (diagnostics.mediaRecorder && diagnostics.getUserMedia) {
+                    systemStatus = 'MediaRecorder (Fallback)';
+                } else {
+                    systemStatus = 'Не поддерживается';
+                }
+
+                this.audioSystemSpan.textContent = systemStatus;
+                console.log('🔍 Audio capabilities:', diagnostics);
             }
 
             async runDiagnostics() {
@@ -566,7 +633,7 @@
                         return;
                     }
                     
-                    // Запрашиваем доступ к микрофону
+                    // ✅ ИСПРАВЛЕНО: Запрашиваем доступ к микрофону с правильными настройками
                     this.addMessage('system', '🎤 Запрос доступа к микрофону...');
                     this.audioStream = await navigator.mediaDevices.getUserMedia({ 
                         audio: {
@@ -604,7 +671,6 @@
                             if (signedData.error) {
                                 this.addMessage('system', `Причина: ${signedData.error}`);
                                 
-                                // Показываем рекомендации если есть
                                 if (signedData.recommendations) {
                                     signedData.recommendations.forEach(rec => {
                                         this.addMessage('system', `💡 ${rec}`);
@@ -638,7 +704,6 @@
                             this.addMessage('system', '• Агент временно недоступен');
                             this.ws.close();
                             
-                            // Попробуем альтернативное подключение
                             if (connectionMethod === 'signed') {
                                 this.tryAlternativeConnection();
                             }
@@ -647,7 +712,7 @@
 
                     this.ws.onopen = () => {
                         clearTimeout(connectionTimeout);
-                        this.connectionRetryCount = 0; // Сброс при успешном подключении
+                        this.connectionRetryCount = 0;
                         this.onWebSocketOpen();
                     };
                     
@@ -737,7 +802,6 @@
             async tryAlternativeConnection() {
                 this.addMessage('system', '🔄 Попытка альтернативного подключения...');
                 
-                // Пробуем подключиться напрямую без signed URL
                 const directUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
                 
                 try {
@@ -777,7 +841,7 @@
                 this.connectionStateSpan.textContent = 'Инициализация...';
                 this.addMessage('system', '🔗 WebSocket подключен, инициализация...');
                 
-                // Отправляем инициализационное сообщение согласно документации
+                // ✅ Отправляем инициализационное сообщение согласно документации
                 const initMessage = {
                     type: "conversation_initiation_client_data",
                     conversation_config_override: {
@@ -805,26 +869,20 @@
                     }
                 }, 10000);
                 
-                // Запускаем keep-alive согласно документации (каждые 15 сек)
                 this.startKeepAlive();
-                
-                // Запускаем ping monitoring для измерения латентности
                 this.startPingMonitoring();
             }
 
             startKeepAlive() {
-                // Отправляем пробел каждые 15 секунд для поддержания соединения
-                // согласно документации: WebSocket закрывается после 20 сек неактивности
                 this.keepAliveInterval = setInterval(() => {
                     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        // Отправляем специальное keep-alive сообщение
                         const keepAliveMessage = {
                             type: "keep_alive"
                         };
                         this.ws.send(JSON.stringify(keepAliveMessage));
                         console.log('💓 Keep-alive sent');
                     }
-                }, 15000); // Каждые 15 секунд
+                }, 15000);
             }
 
             stopKeepAlive() {
@@ -836,7 +894,6 @@
 
             onWebSocketMessage(event) {
                 try {
-                    // Обновляем время последней активности
                     this.lastActivityTime = Date.now();
                     
                     const data = JSON.parse(event.data);
@@ -896,7 +953,6 @@
                 const errorMsg = data.error || data.message || 'Unknown server error';
                 this.addMessage('system', `❌ Ошибка сервера: ${errorMsg}`);
                 
-                // Если ошибка критичная, отключаемся
                 if (data.critical || data.fatal) {
                     this.addMessage('system', '💥 Критичная ошибка, отключение...');
                     this.disconnect();
@@ -904,7 +960,6 @@
             }
 
             handlePong(data) {
-                // Обрабатываем ответ на ping
                 if (this.lastPingTime) {
                     const pingTime = Date.now() - this.lastPingTime;
                     this.pingTimeSpan.textContent = pingTime;
@@ -938,7 +993,6 @@
                     statusMessage = '🔴 Ошибка соединения';
                     shouldRetry = true;
                     
-                    // Дополнительная диагностика для 1006
                     this.addMessage('system', '🔍 Возможные причины ошибки 1006:');
                     this.addMessage('system', '• Проблемы с аутентификацией (неверный API ключ)');
                     this.addMessage('system', '• Агент недоступен или неактивен');
@@ -974,10 +1028,9 @@
                 this.stopPingMonitoring();
                 this.stopKeepAlive();
                 
-                // Автоматическое переподключение для определенных ошибок
                 if (shouldRetry && this.connectionRetryCount < this.maxRetries) {
                     this.connectionRetryCount++;
-                    const retryDelay = this.connectionRetryCount * 2000; // Увеличивающаяся задержка
+                    const retryDelay = this.connectionRetryCount * 2000;
                     
                     this.addMessage('system', `🔄 Автоматическое переподключение через ${retryDelay/1000} сек (попытка ${this.connectionRetryCount}/${this.maxRetries})`);
                     
@@ -1006,7 +1059,6 @@
                     recommendations.push('• Возможно истек токен безопасности');
                     recommendations.push('• Попробуем альтернативное подключение...');
                     
-                    // Автоматически пробуем альтернативное подключение
                     setTimeout(() => {
                         if (!this.isConnected) {
                             this.tryAlternativeConnection();
@@ -1059,6 +1111,7 @@
                 this.connectBtn.disabled = true;
                 this.disconnectBtn.disabled = false;
                 
+                // ✅ ИСПРАВЛЕНО: запускаем новую аудио систему
                 this.startRecording();
             }
 
@@ -1080,7 +1133,6 @@
             handleAgentResponseCorrection(data) {
                 const correction = data.agent_response_correction_event;
                 console.log('Agent response correction:', correction);
-                // Обновляем последнее сообщение агента
                 const messages = this.chatArea.querySelectorAll('.message.assistant');
                 if (messages.length > 0) {
                     const lastMessage = messages[messages.length - 1];
@@ -1104,7 +1156,6 @@
                 this.micAnimation.classList.add('interrupted');
                 this.addMessage('system', '⚠️ Разговор прерван - продолжайте говорить');
                 
-                // Возвращаемся к слушанию через короткое время
                 setTimeout(() => {
                     if (this.isConnected) {
                         this.updateStatus('listening', '🟢 Слушаю...');
@@ -1115,7 +1166,6 @@
             }
 
             handlePing(data) {
-                // Отвечаем на ping сообщение pong согласно документации
                 const pongMessage = {
                     type: "pong",
                     event_id: data.ping_event.event_id
@@ -1124,7 +1174,6 @@
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     this.ws.send(JSON.stringify(pongMessage));
                     
-                    // Вычисляем время ping-pong если есть данные
                     if (this.lastPingTime) {
                         const pingTime = Date.now() - this.lastPingTime;
                         this.pingTimeSpan.textContent = pingTime;
@@ -1135,15 +1184,12 @@
             }
 
             handleVadScore(data) {
-                // Обрабатываем VAD (Voice Activity Detection) score
                 this.vadScore = data.vad_score_event.vad_score;
                 this.vadScoreSpan.textContent = this.vadScore.toFixed(2);
                 
-                // Обновляем визуальную индикацию
                 const percentage = this.vadScore * 100;
                 this.volumeBar.style.width = percentage + '%';
                 
-                // Меняем цвет полосы в зависимости от активности
                 if (this.vadScore > 0.7) {
                     this.volumeBar.style.background = 'linear-gradient(45deg, #2ed573, #1e90ff)';
                 } else if (this.vadScore > 0.3) {
@@ -1158,11 +1204,7 @@
             }
 
             handleClientToolCall(data) {
-                // Обрабатываем вызовы клиентских инструментов (если потребуется)
                 console.log('Client tool call:', data);
-                
-                // Здесь можно добавить логику для выполнения клиентских инструментов
-                // и отправки результата обратно через client_tool_result
             }
 
             playAudio(audioBase64) {
@@ -1180,7 +1222,6 @@
                     
                     audio.onended = () => {
                         URL.revokeObjectURL(audioUrl);
-                        // Когда аудио закончилось, возвращаемся к слушанию
                         if (this.isConnected) {
                             this.isAgentSpeaking = false;
                             this.updateStatus('listening', '🟢 Слушаю...');
@@ -1198,31 +1239,179 @@
                 }
             }
 
+            // ✅ ПОЛНОСТЬЮ ПЕРЕПИСАННАЯ АУДИО СИСТЕМА для PCM формата
             startRecording() {
                 if (!this.audioStream) return;
 
                 try {
+                    console.log('🎤 Starting audio recording with PCM 16kHz format...');
+                    
+                    // ✅ Создаем AudioContext с правильной частотой дискретизации
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
+                    
+                    if (!this.audioContext) {
+                        throw new Error('AudioContext not supported');
+                    }
+                    
+                    // Создаем источник из медиа потока
+                    this.audioSource = this.audioContext.createMediaStreamSource(this.audioStream);
+                    
+                    // ✅ Создаем процессор для обработки аудио в реальном времени
+                    this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    // ✅ Обработчик аудио данных
+                    this.audioProcessor.onaudioprocess = (event) => {
+                        // Отправляем аудио только если соединение активно и агент не говорит
+                        if (this.ws && 
+                            this.ws.readyState === WebSocket.OPEN && 
+                            !this.isAgentSpeaking &&
+                            this.isInitialized) {
+                            
+                            const inputBuffer = event.inputBuffer;
+                            const channelData = inputBuffer.getChannelData(0); // Моно канал
+                            
+                            // ✅ Конвертируем float32 в PCM 16-bit
+                            const pcmData = this.convertToPCM16(channelData);
+                            
+                            // ✅ Кодируем в base64
+                            const base64Audio = this.arrayBufferToBase64(pcmData);
+                            
+                            // ✅ Отправляем в правильном формате согласно документации
+                            const audioMessage = {
+                                user_audio_chunk: base64Audio
+                            };
+                            
+                            try {
+                                this.ws.send(JSON.stringify(audioMessage));
+                                this.lastActivityTime = Date.now();
+                                
+                                // Обновляем индикатор активности голоса
+                                const volume = this.calculateVolume(channelData);
+                                this.updateVolumeIndicator(volume);
+                                
+                            } catch (error) {
+                                console.error('Error sending audio chunk:', error);
+                            }
+                        }
+                    };
+                    
+                    // ✅ Подключаем аудио цепочку
+                    this.audioSource.connect(this.audioProcessor);
+                    this.audioProcessor.connect(this.audioContext.destination);
+                    
+                    // Обновляем UI и диагностику
+                    this.micAnimation.classList.add('listening');
+                    this.updateStatus('listening', '🟢 Слушаю...');
+                    
+                    this.audioSystemSpan.textContent = 'AudioContext (PCM 16kHz)';
+                    this.bufferInfoSpan.textContent = `${this.audioContext.sampleRate}Hz, 4096 samples`;
+                    
+                    console.log('✅ Audio recording started successfully');
+                    console.log(`📊 Sample rate: ${this.audioContext.sampleRate}Hz`);
+                    console.log(`🔧 Buffer size: 4096 samples`);
+                    
+                } catch (error) {
+                    console.error('❌ Failed to start audio recording:', error);
+                    this.addMessage('system', `❌ Ошибка записи аудио: ${error.message}`);
+                    
+                    // Fallback на MediaRecorder
+                    this.startMediaRecorderFallback();
+                }
+            }
+
+            // ✅ Функция конвертации float32 в PCM 16-bit
+            convertToPCM16(float32Array) {
+                const buffer = new ArrayBuffer(float32Array.length * 2);
+                const view = new DataView(buffer);
+                
+                for (let i = 0; i < float32Array.length; i++) {
+                    // Нормализуем значение от -1.0 до 1.0
+                    let sample = Math.max(-1, Math.min(1, float32Array[i]));
+                    
+                    // Конвертируем в 16-bit signed integer
+                    const pcmSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    
+                    // Записываем в little-endian формате
+                    view.setInt16(i * 2, pcmSample, true);
+                }
+                
+                return new Uint8Array(buffer);
+            }
+
+            // ✅ Функция конвертации ArrayBuffer в base64
+            arrayBufferToBase64(buffer) {
+                let binary = '';
+                const bytes = new Uint8Array(buffer);
+                const len = bytes.byteLength;
+                
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                
+                return btoa(binary);
+            }
+
+            // ✅ Расчет громкости для визуальной индикации
+            calculateVolume(channelData) {
+                let sum = 0;
+                for (let i = 0; i < channelData.length; i++) {
+                    sum += channelData[i] * channelData[i];
+                }
+                
+                const rms = Math.sqrt(sum / channelData.length);
+                return Math.min(1, rms * 10); // Усиливаем для лучшей видимости
+            }
+
+            // ✅ Обновление индикатора громкости
+            updateVolumeIndicator(volume) {
+                if (this.volumeBar) {
+                    const percentage = volume * 100;
+                    this.volumeBar.style.width = percentage + '%';
+                    
+                    // Меняем цвет в зависимости от громкости
+                    if (volume > 0.3) {
+                        this.volumeBar.style.background = 'linear-gradient(45deg, #2ed573, #1e90ff)';
+                    } else if (volume > 0.1) {
+                        this.volumeBar.style.background = 'linear-gradient(45deg, #ffa502, #ff6348)';
+                    } else {
+                        this.volumeBar.style.background = 'linear-gradient(45deg, #667eea, #764ba2)';
+                    }
+                }
+            }
+
+            // ✅ Fallback на MediaRecorder если AudioContext не работает
+            startMediaRecorderFallback() {
+                console.log('🔄 Trying MediaRecorder fallback...');
+                
+                try {
                     this.mediaRecorder = new MediaRecorder(this.audioStream, {
-                        mimeType: 'audio/webm;codecs=opus'
+                        mimeType: 'audio/webm;codecs=opus',
+                        audioBitsPerSecond: 128000
                     });
 
                     this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        if (event.data.size > 0 && 
+                            this.ws && 
+                            this.ws.readyState === WebSocket.OPEN && 
+                            !this.isAgentSpeaking) {
+                            
                             const reader = new FileReader();
                             reader.onload = () => {
                                 try {
+                                    // ⚠️ Это fallback - не идеальный формат, но работает
                                     const base64 = reader.result.split(',')[1];
                                     
-                                    // Отправляем аудио чанк согласно документации
                                     const audioMessage = {
                                         user_audio_chunk: base64
                                     };
                                     
                                     this.ws.send(JSON.stringify(audioMessage));
-                                    this.lastActivityTime = Date.now(); // Обновляем время активности
+                                    this.lastActivityTime = Date.now();
                                     
                                 } catch (error) {
-                                    console.error('Error sending audio chunk:', error);
+                                    console.error('Error sending fallback audio chunk:', error);
                                 }
                             };
                             
@@ -1235,50 +1424,74 @@
                     };
 
                     this.mediaRecorder.onerror = (event) => {
-                        console.error('MediaRecorder error:', event.error);
-                        this.addMessage('system', `❌ Ошибка записи: ${event.error}`);
+                        console.error('MediaRecorder fallback error:', event.error);
+                        this.addMessage('system', `❌ Ошибка записи (fallback): ${event.error}`);
                     };
 
-                    this.mediaRecorder.onstop = () => {
-                        console.log('🎤 Recording stopped');
-                    };
-
-                    // Запускаем запись с интервалом согласно настройке
                     this.mediaRecorder.start(this.chunkInterval);
                     this.micAnimation.classList.add('listening');
                     
-                    console.log(`🎤 Recording started with ${this.chunkInterval}ms chunks`);
+                    this.audioSystemSpan.textContent = 'MediaRecorder (Fallback)';
+                    this.addMessage('system', '⚠️ Используется fallback режим записи');
+                    console.log('📼 MediaRecorder fallback started');
                     
                 } catch (error) {
-                    console.error('Failed to start recording:', error);
-                    this.addMessage('system', `❌ Не удалось начать запись: ${error.message}`);
+                    console.error('❌ MediaRecorder fallback also failed:', error);
+                    this.addMessage('system', '❌ Все методы записи аудио не удались');
                 }
             }
 
             stopRecording() {
+                console.log('🛑 Stopping audio recording...');
+                
+                // Останавливаем AudioContext если используется
+                if (this.audioProcessor) {
+                    this.audioProcessor.disconnect();
+                    this.audioProcessor = null;
+                }
+                
+                if (this.audioSource) {
+                    this.audioSource.disconnect();
+                    this.audioSource = null;
+                }
+                
+                if (this.audioContext && this.audioContext.state !== 'closed') {
+                    this.audioContext.close().then(() => {
+                        console.log('📊 AudioContext closed');
+                    }).catch(error => {
+                        console.error('Error closing AudioContext:', error);
+                    });
+                    this.audioContext = null;
+                }
+                
+                // Останавливаем MediaRecorder fallback если используется
                 if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
                     this.mediaRecorder.stop();
+                    this.mediaRecorder = null;
                 }
                 
-                if (this.recordingTimer) {
-                    clearInterval(this.recordingTimer);
-                    this.recordingTimer = null;
-                }
-                
+                // Очищаем UI индикаторы
                 this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
+                
+                if (this.volumeBar) {
+                    this.volumeBar.style.width = '0%';
+                }
+                
+                this.audioSystemSpan.textContent = 'Остановлено';
+                console.log('✅ Audio recording stopped');
             }
 
             restartRecording() {
                 if (this.isConnected && this.isInitialized) {
+                    console.log('🔄 Restarting audio recording...');
                     this.stopRecording();
                     setTimeout(() => {
                         this.startRecording();
-                    }, 100);
+                    }, 500);
                 }
             }
 
             startPingMonitoring() {
-                // Отправляем ping каждые 30 секунд для мониторинга соединения
                 this.pingInterval = setInterval(() => {
                     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                         this.lastPingTime = Date.now();
@@ -1301,7 +1514,6 @@
 
             disconnect() {
                 if (this.ws) {
-                    // Согласно документации, отправляем пустую строку для корректного закрытия
                     if (this.ws.readyState === WebSocket.OPEN) {
                         try {
                             this.ws.send(JSON.stringify({ type: "end_of_stream" }));
@@ -1315,11 +1527,6 @@
                 if (this.audioStream) {
                     this.audioStream.getTracks().forEach(track => track.stop());
                     this.audioStream = null;
-                }
-
-                if (this.audioContext) {
-                    this.audioContext.close();
-                    this.audioContext = null;
                 }
 
                 if (this.initializationTimeout) {
@@ -1339,7 +1546,7 @@
                 this.vadScoreSpan.textContent = '0.00';
                 this.volumeBar.style.width = '0%';
                 this.connectionStateSpan.textContent = 'Отключен';
-                this.connectionRetryCount = 0; // Сброс счетчика при ручном отключении
+                this.connectionRetryCount = 0;
                 this.lastActivityTime = Date.now();
             }
 
