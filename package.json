@@ -4,8 +4,8 @@
   "description": "ElevenLabs Conversational AI WebSocket Client",
   "main": "server-simple.js",
   "scripts": {
-    "start": "node server-simple.js",
-    "dev": "node server-simple.js"
+    "start": "server.js",
+    "dev": "server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
