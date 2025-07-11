@@ -343,7 +343,7 @@
     <div class="container">
         <div class="header">
             <h1 class="title">🎤 ИИ Голосовой Помощник</h1>
-            <p class="subtitle">Powered by ElevenLabs Conversational AI v2.0</p>
+            <p class="subtitle">Powered by ElevenLabs Conversational AI v2.2 • Исправлено аудио</p>
         </div>
 
         <div id="status" class="status disconnected">
@@ -405,7 +405,7 @@
                 💡 При проблемах с подключением нажмите "Диагностика"
             </p>
             <p style="margin-top: 0.25rem; font-size: 0.75rem; color: #999;">
-                v2.1 • Исправленный PCM аудио формат • Улучшенная диагностика • Стабильное соединение
+                v2.2 • Исправлено воспроизведение PCM аудио • Улучшенное VAD • Управление прерываниями • Фильтрация тишины
             </p>
         </div>
     </div>
@@ -451,6 +451,14 @@
                     bufferSize: 0,
                     chunksPerSecond: 0
                 };
+                
+                // ✅ Добавляем управление воспроизведением для прерываний
+                this.currentAudioSource = null;
+                this.audioQueue = [];
+                
+                // ✅ Настройки голосовой активности
+                this.voiceActivityThreshold = 0.01; // Порог для фильтрации тишины
+                this.lastUserSpeechTime = Date.now();
                 
                 this.initializeElements();
                 this.loadAgentConfig();
@@ -575,7 +583,36 @@
                 } finally {
                     this.diagnosticsBtn.disabled = false;
                     this.diagnosticsBtn.innerHTML = '🔍 Диагностика';
+            handleAgentResponseCorrection(data) {
+                const correction = data.agent_response_correction_event;
+                console.log('Agent response correction:', correction);
+                
+                // ✅ Обновляем последнее сообщение агента
+                const messages = this.chatArea.querySelectorAll('.message.assistant');
+                if (messages.length > 0) {
+                    const lastMessage = messages[messages.length - 1];
+                    lastMessage.textContent = correction.corrected_agent_response;
+                    console.log('📝 Agent response corrected');
                 }
+            }
+
+            handlePing(data) {
+                const pongMessage = {
+                    type: "pong",
+                    event_id: data.ping_event.event_id
+                };
+                
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify(pongMessage));
+                    
+                    // ✅ Обновляем ping статистику
+                    if (this.lastPingTime) {
+                        const pingTime = Date.now() - this.lastPingTime;
+                        this.pingTimeSpan.textContent = pingTime;
+                    }
+                }
+                
+                console.log('🏓 Ping received, pong sent');
             }
 
             async loadAgentConfig() {
@@ -1120,77 +1157,101 @@
             handleAgentResponse(data) {
                 const response = data.agent_response_event.agent_response;
                 this.addMessage('assistant', response);
+                
+                // ✅ Агент начинает говорить - останавливаем запись пользователя
                 this.isAgentSpeaking = true;
                 this.updateStatus('speaking', '🎯 ИИ говорит...');
                 this.micAnimation.classList.remove('recording', 'listening', 'interrupted');
-            }
-
-            handleAgentResponseCorrection(data) {
-                const correction = data.agent_response_correction_event;
-                console.log('Agent response correction:', correction);
-                const messages = this.chatArea.querySelectorAll('.message.assistant');
-                if (messages.length > 0) {
-                    const lastMessage = messages[messages.length - 1];
-                    lastMessage.textContent = correction.corrected_agent_response;
-                }
+                
+                console.log('🗣️ Agent started speaking, pausing user recording');
             }
 
             handleAudioResponse(data) {
                 try {
                     const audioBase64 = data.audio_event.audio_base_64;
+                    
+                    // ✅ Агент отправляет аудио - воспроизводим его
+                    console.log('🔊 Received audio from agent, playing...');
                     this.playAudio(audioBase64);
+                    
                 } catch (error) {
-                    console.error('Error playing audio:', error);
+                    console.error('Error handling audio response:', error);
+                    // Восстанавливаем состояние при ошибке
+                    if (this.isConnected) {
+                        this.isAgentSpeaking = false;
+                        this.updateStatus('listening', '🟢 Слушаю...');
+                        this.micAnimation.classList.add('listening');
+                    }
                 }
             }
 
             handleInterruption(data) {
-                console.log('Interruption detected:', data);
+                console.log('⚠️ Interruption detected:', data);
+                
+                // ✅ Прерывание - немедленно останавливаем воспроизведение агента
                 this.isAgentSpeaking = false;
                 this.updateStatus('interrupted', '⚠️ Прервано');
                 this.micAnimation.classList.add('interrupted');
+                
+                // Останавливаем текущее воспроизведение если есть
+                if (this.currentAudioSource) {
+                    this.currentAudioSource.stop();
+                    this.currentAudioSource = null;
+                }
+                
                 this.addMessage('system', '⚠️ Разговор прерван - продолжайте говорить');
                 
+                // ✅ Быстрее возвращаемся к слушанию после прерывания
                 setTimeout(() => {
-                    if (this.isConnected) {
+                    if (this.isConnected && !this.isAgentSpeaking) {
                         this.updateStatus('listening', '🟢 Слушаю...');
                         this.micAnimation.classList.remove('interrupted');
                         this.micAnimation.classList.add('listening');
+                        console.log('🎤 Resumed listening after interruption');
                     }
-                }, 1000);
-            }
-
-            handlePing(data) {
-                const pongMessage = {
-                    type: "pong",
-                    event_id: data.ping_event.event_id
-                };
-                
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify(pongMessage));
-                    
-                    if (this.lastPingTime) {
-                        const pingTime = Date.now() - this.lastPingTime;
-                        this.pingTimeSpan.textContent = pingTime;
-                    }
-                }
-                
-                console.log('Ping received, pong sent');
+                }, 500); // Уменьшили с 1000 до 500мс для более быстрой реакции
             }
 
             handleVadScore(data) {
                 this.vadScore = data.vad_score_event.vad_score;
                 this.vadScoreSpan.textContent = this.vadScore.toFixed(2);
                 
+                // ✅ Улучшенная VAD индикация
                 const percentage = this.vadScore * 100;
                 this.volumeBar.style.width = percentage + '%';
                 
-                if (this.vadScore > 0.7) {
-                    this.volumeBar.style.background = 'linear-gradient(45deg, #2ed573, #1e90ff)';
-                } else if (this.vadScore > 0.3) {
-                    this.volumeBar.style.background = 'linear-gradient(45deg, #ffa502, #ff6348)';
+                // ✅ Более точная цветовая индикация активности голоса
+                if (this.vadScore > 0.8) {
+                    this.volumeBar.style.background = 'linear-gradient(45deg, #00ff00, #32cd32)'; // Яркий зеленый - четкая речь
+                    if (!this.isAgentSpeaking) {
+                        this.micAnimation.classList.add('recording');
+                        this.micAnimation.classList.remove('listening');
+                    }
+                } else if (this.vadScore > 0.5) {
+                    this.volumeBar.style.background = 'linear-gradient(45deg, #2ed573, #1e90ff)'; // Синий-зеленый - вероятная речь
+                } else if (this.vadScore > 0.2) {
+                    this.volumeBar.style.background = 'linear-gradient(45deg, #ffa502, #ff6348)'; // Оранжевый - возможная речь
+                    if (!this.isAgentSpeaking) {
+                        this.micAnimation.classList.remove('recording');
+                        this.micAnimation.classList.add('listening');
+                    }
                 } else {
-                    this.volumeBar.style.background = 'linear-gradient(45deg, #667eea, #764ba2)';
+                    this.volumeBar.style.background = 'linear-gradient(45deg, #667eea, #764ba2)'; // Фиолетовый - тишина
+                    if (!this.isAgentSpeaking) {
+                        this.micAnimation.classList.remove('recording');
+                        this.micAnimation.classList.add('listening');
+                    }
+                }
+                
+                // ✅ Динамическое обновление статуса на основе VAD
+                if (!this.isAgentSpeaking && this.isConnected && this.isInitialized) {
+                    if (this.vadScore > 0.8) {
+                        this.updateStatus('recording', '🎤 Запись речи...');
+                    } else if (this.vadScore > 0.3) {
+                        this.updateStatus('listening', '🟢 Слушаю (возможна речь)...');
+                    } else {
+                        this.updateStatus('listening', '🟢 Слушаю...');
+                    }
                 }
             }
 
@@ -1202,36 +1263,144 @@
                 console.log('Client tool call:', data);
             }
 
-            playAudio(audioBase64) {
+            // ✅ ИСПРАВЛЕННОЕ воспроизведение аудио: конвертация PCM в WAV
+            async playAudio(audioBase64) {
                 try {
+                    // Декодируем base64 в PCM данные
                     const audioData = atob(audioBase64);
-                    const audioArray = new Uint8Array(audioData.length);
+                    const pcmArray = new Uint8Array(audioData.length);
                     
                     for (let i = 0; i < audioData.length; i++) {
-                        audioArray[i] = audioData.charCodeAt(i);
+                        pcmArray[i] = audioData.charCodeAt(i);
                     }
 
-                    const audioBlob = new Blob([audioArray], { type: 'audio/pcm' });
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    const audio = new Audio(audioUrl);
+                    // ✅ Конвертируем PCM в WAV формат для браузера
+                    const wavBlob = this.createWavBlob(pcmArray, 16000, 1, 16);
+                    const audioUrl = URL.createObjectURL(wavBlob);
                     
-                    audio.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
-                        if (this.isConnected) {
-                            this.isAgentSpeaking = false;
-                            this.updateStatus('listening', '🟢 Слушаю...');
-                            this.micAnimation.classList.remove('recording');
-                            this.micAnimation.classList.add('listening');
+                    // ✅ Используем Web Audio API для лучшего контроля
+                    if (this.audioContext && this.audioContext.state !== 'closed') {
+                        try {
+                            const arrayBuffer = await wavBlob.arrayBuffer();
+                            const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                            
+                            const source = this.audioContext.createBufferSource();
+                            source.buffer = audioBuffer;
+                            source.connect(this.audioContext.destination);
+                            
+                            // ✅ Сохраняем ссылку для возможности прерывания
+                            this.currentAudioSource = source;
+                            
+                            // Обработчик окончания воспроизведения
+                            source.onended = () => {
+                                URL.revokeObjectURL(audioUrl);
+                                this.currentAudioSource = null; // Очищаем ссылку
+                                if (this.isConnected) {
+                                    this.isAgentSpeaking = false;
+                                    this.updateStatus('listening', '🟢 Слушаю...');
+                                    this.micAnimation.classList.remove('recording');
+                                    this.micAnimation.classList.add('listening');
+                                    console.log('🔊 Agent finished speaking, resuming listening');
+                                }
+                            };
+                            
+                            // Запускаем воспроизведение
+                            source.start();
+                            console.log('🔊 Playing agent audio via Web Audio API');
+                            
+                        } catch (webAudioError) {
+                            console.warn('Web Audio API failed, falling back to HTML5 audio:', webAudioError);
+                            this.playAudioFallback(audioUrl);
                         }
-                    };
-                    
-                    audio.play().catch(error => {
-                        console.error('Audio playback failed:', error);
-                    });
+                    } else {
+                        // Fallback на обычный HTML5 audio
+                        this.playAudioFallback(audioUrl);
+                    }
 
                 } catch (error) {
                     console.error('Error processing audio:', error);
+                    // Попытка восстановить состояние при ошибке
+                    if (this.isConnected) {
+                        this.isAgentSpeaking = false;
+                        this.updateStatus('listening', '🟢 Слушаю...');
+                        this.micAnimation.classList.add('listening');
+                    }
                 }
+            }
+
+            // ✅ Создание WAV blob из PCM данных
+            createWavBlob(pcmArray, sampleRate, numChannels, bitsPerSample) {
+                const length = pcmArray.length;
+                const arrayBuffer = new ArrayBuffer(44 + length);
+                const view = new DataView(arrayBuffer);
+                
+                // WAV заголовок
+                const writeString = (offset, string) => {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(offset + i, string.charCodeAt(i));
+                    }
+                };
+                
+                writeString(0, 'RIFF');
+                view.setUint32(4, 36 + length, true);
+                writeString(8, 'WAVE');
+                writeString(12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+                view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+                view.setUint16(34, bitsPerSample, true);
+                writeString(36, 'data');
+                view.setUint32(40, length, true);
+                
+                // PCM данные
+                for (let i = 0; i < length; i++) {
+                    view.setUint8(44 + i, pcmArray[i]);
+                }
+                
+                return new Blob([arrayBuffer], { type: 'audio/wav' });
+            }
+
+            // ✅ Fallback воспроизведение через HTML5 audio
+            playAudioFallback(audioUrl) {
+                const audio = new Audio(audioUrl);
+                
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    if (this.isConnected) {
+                        this.isAgentSpeaking = false;
+                        this.updateStatus('listening', '🟢 Слушаю...');
+                        this.micAnimation.classList.remove('recording');
+                        this.micAnimation.classList.add('listening');
+                        console.log('🔊 Agent finished speaking (fallback), resuming listening');
+                    }
+                };
+                
+                audio.onerror = (error) => {
+                    console.error('HTML5 audio playback failed:', error);
+                    URL.revokeObjectURL(audioUrl);
+                    // Восстанавливаем состояние
+                    if (this.isConnected) {
+                        this.isAgentSpeaking = false;
+                        this.updateStatus('listening', '🟢 Слушаю...');
+                        this.micAnimation.classList.add('listening');
+                    }
+                };
+                
+                audio.play().catch(error => {
+                    console.error('Audio playback failed:', error);
+                    URL.revokeObjectURL(audioUrl);
+                    // Восстанавливаем состояние
+                    if (this.isConnected) {
+                        this.isAgentSpeaking = false;
+                        this.updateStatus('listening', '🟢 Слушаю...');
+                        this.micAnimation.classList.add('listening');
+                    }
+                });
+                
+                console.log('🔊 Playing agent audio via HTML5 audio (fallback)');
             }
 
             // ✅ ПОЛНОСТЬЮ ПЕРЕПИСАННАЯ АУДИО СИСТЕМА для PCM формата
@@ -1256,9 +1425,13 @@
                     // ✅ Создаем процессор для обработки аудио в реальном времени
                     this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
                     
-                    // ✅ Обработчик аудио данных
+                    // ✅ Обработчик аудио данных с улучшенной логикой
                     this.audioProcessor.onaudioprocess = (event) => {
-                        // Отправляем аудио только если соединение активно и агент не говорит
+                        // ✅ Отправляем аудио только когда:
+                        // - WebSocket соединение активно
+                        // - Агент НЕ говорит  
+                        // - Система инициализирована
+                        // - VAD показывает активность голоса (опционально)
                         if (this.ws && 
                             this.ws.readyState === WebSocket.OPEN && 
                             !this.isAgentSpeaking &&
@@ -1267,27 +1440,36 @@
                             const inputBuffer = event.inputBuffer;
                             const channelData = inputBuffer.getChannelData(0); // Моно канал
                             
-                            // ✅ Конвертируем float32 в PCM 16-bit
-                            const pcmData = this.convertToPCM16(channelData);
+                            // ✅ Вычисляем уровень активности для фильтрации тишины
+                            const volume = this.calculateVolume(channelData);
                             
-                            // ✅ Кодируем в base64
-                            const base64Audio = this.arrayBufferToBase64(pcmData);
-                            
-                            // ✅ Отправляем в правильном формате согласно документации
-                            const audioMessage = {
-                                user_audio_chunk: base64Audio
-                            };
-                            
-                            try {
-                                this.ws.send(JSON.stringify(audioMessage));
-                                this.lastActivityTime = Date.now();
+                            // ✅ Отправляем аудио только если есть минимальная активность
+                            // Это помогает избежать отправки фонового шума
+                            if (volume > this.voiceActivityThreshold) {
+                                // Конвертируем float32 в PCM 16-bit
+                                const pcmData = this.convertToPCM16(channelData);
                                 
-                                // Обновляем индикатор активности голоса
-                                const volume = this.calculateVolume(channelData);
+                                // Кодируем в base64
+                                const base64Audio = this.arrayBufferToBase64(pcmData);
+                                
+                                // ✅ Отправляем в правильном формате согласно документации
+                                const audioMessage = {
+                                    user_audio_chunk: base64Audio
+                                };
+                                
+                                try {
+                                    this.ws.send(JSON.stringify(audioMessage));
+                                    this.lastActivityTime = Date.now();
+                                    
+                                    // Обновляем индикатор активности голоса
+                                    this.updateVolumeIndicator(volume);
+                                    
+                                } catch (error) {
+                                    console.error('Error sending audio chunk:', error);
+                                }
+                            } else {
+                                // ✅ Тишина - просто обновляем индикатор
                                 this.updateVolumeIndicator(volume);
-                                
-                            } catch (error) {
-                                console.error('Error sending audio chunk:', error);
                             }
                         }
                     };
@@ -1361,6 +1543,11 @@
 
             // ✅ Обновление индикатора громкости
             updateVolumeIndicator(volume) {
+                // ✅ Отслеживаем время последней активности пользователя
+                if (volume > this.voiceActivityThreshold) {
+                    this.lastUserSpeechTime = Date.now();
+                }
+                
                 if (this.volumeBar) {
                     const percentage = volume * 100;
                     this.volumeBar.style.width = percentage + '%';
@@ -1387,10 +1574,12 @@
                     });
 
                     this.mediaRecorder.ondataavailable = (event) => {
+                        // ✅ Улучшенная логика для fallback режима
                         if (event.data.size > 0 && 
                             this.ws && 
                             this.ws.readyState === WebSocket.OPEN && 
-                            !this.isAgentSpeaking) {
+                            !this.isAgentSpeaking &&
+                            this.isInitialized) {
                             
                             const reader = new FileReader();
                             reader.onload = () => {
@@ -1404,6 +1593,8 @@
                                     
                                     this.ws.send(JSON.stringify(audioMessage));
                                     this.lastActivityTime = Date.now();
+                                    
+                                    console.log('📤 Sent audio chunk (fallback mode)');
                                     
                                 } catch (error) {
                                     console.error('Error sending fallback audio chunk:', error);
@@ -1438,6 +1629,17 @@
 
             stopRecording() {
                 console.log('🛑 Stopping audio recording...');
+                
+                // ✅ Останавливаем текущее воспроизведение агента если идет
+                if (this.currentAudioSource) {
+                    try {
+                        this.currentAudioSource.stop();
+                        this.currentAudioSource = null;
+                        console.log('🔊 Stopped current agent audio playback');
+                    } catch (error) {
+                        console.log('Audio source already stopped:', error);
+                    }
+                }
                 
                 // Останавливаем AudioContext если используется
                 if (this.audioProcessor) {
@@ -1474,6 +1676,24 @@
                 
                 this.audioSystemSpan.textContent = 'Остановлено';
                 console.log('✅ Audio recording stopped');
+            }
+
+            // ✅ НОВАЯ функция для настройки порога активности
+            setVoiceActivityThreshold(threshold) {
+                this.voiceActivityThreshold = Math.max(0.001, Math.min(0.1, threshold));
+                console.log(`🎚️ Voice activity threshold set to: ${this.voiceActivityThreshold}`);
+            }
+
+            // ✅ НОВАЯ функция для получения статистики аудио
+            getAudioStats() {
+                return {
+                    isRecording: !!(this.audioProcessor || this.mediaRecorder),
+                    isAgentSpeaking: this.isAgentSpeaking,
+                    currentVAD: this.vadScore,
+                    sampleRate: this.audioContext ? this.audioContext.sampleRate : 0,
+                    audioSystem: this.audioSystemSpan ? this.audioSystemSpan.textContent : 'Unknown',
+                    connectionState: this.isConnected ? 'Connected' : 'Disconnected'
+                };
             }
 
             restartRecording() {
