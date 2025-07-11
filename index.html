@@ -751,7 +751,10 @@
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     // ElevenLabs ожидает простое сообщение для начала разговора
                     const initMessage = {
-                        type: "conversation_initiation_client_data"
+                        type: "conversation_initiation_client_data",
+                        conversation_initiation_client_data: {
+                            custom_llm_extra_body: {}
+                        }
                     };
                     
                     console.log('📤 Sending initialization message to ElevenLabs:', initMessage);
@@ -762,7 +765,7 @@
             onWebSocketMessage(event) {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log('📥 Received from ElevenLabs:', data);
+                    console.log('📥 Received from ElevenLabs:', data.type, data);
 
                     const messageType = data.type;
 
@@ -772,6 +775,7 @@
                             break;
                             
                         case 'user_transcript':
+                        case 'user_transcription':
                             this.handleUserTranscript(data);
                             break;
                             
@@ -804,12 +808,40 @@
                             this.handleServerError(data);
                             break;
                             
+                        // Добавляем обработку дополнительных типов сообщений
+                        case 'internal_vad':
+                        case 'vad_score':
+                            console.log('🎤 VAD from ElevenLabs:', data);
+                            break;
+                            
+                        case 'user_speech_started':
+                            console.log('🗣️ User speech started (ElevenLabs VAD)');
+                            // Здесь может происходить перебивание
+                            if (this.isAgentSpeaking) {
+                                console.log('⚡ Voice interruption detected by ElevenLabs VAD!');
+                                this.handleVoiceInterruption({ 
+                                    type: "interruption", 
+                                    source: "elevenlabs_vad",
+                                    trigger: "user_speech_started"
+                                });
+                            }
+                            break;
+                            
+                        case 'user_speech_stopped':
+                            console.log('🔇 User speech stopped (ElevenLabs VAD)');
+                            break;
+                            
                         default:
-                            console.log('Unknown message type:', messageType, data);
+                            console.log('Unknown message type from ElevenLabs:', messageType, data);
                     }
                 } catch (error) {
                     console.error('Error parsing WebSocket message:', error);
                     console.error('Raw message:', event.data);
+                    
+                    // Проверяем если это бинарные данные
+                    if (typeof event.data !== 'string') {
+                        console.log('Received binary data, length:', event.data.length || event.data.byteLength || 'unknown');
+                    }
                 }
             }
 
@@ -836,20 +868,50 @@
             }
 
             handleUserTranscript(data) {
-                const transcript = data.user_transcription_event.user_transcript;
-                if (transcript.trim()) {
+                // ElevenLabs может отправлять транскрипцию в разных форматах
+                let transcript = '';
+                
+                if (data.user_transcription_event) {
+                    transcript = data.user_transcription_event.user_transcript;
+                } else if (data.user_transcript_event) {
+                    transcript = data.user_transcript_event.user_transcript;
+                } else if (data.transcript) {
+                    transcript = data.transcript;
+                } else if (data.user_transcript) {
+                    transcript = data.user_transcript;
+                }
+                
+                if (transcript && transcript.trim()) {
                     console.log('👤 User transcript:', transcript);
                     this.addMessage('user', transcript);
+                } else {
+                    console.log('👤 Empty or invalid user transcript:', data);
                 }
             }
 
             handleAgentResponse(data) {
-                const response = data.agent_response_event.agent_response;
-                console.log('🤖 Agent response:', response);
-                this.addMessage('assistant', response);
+                // ElevenLabs может отправлять ответ в разных форматах
+                let response = '';
                 
-                // Ассистент начал отвечать
-                this.setAgentSpeaking(true);
+                if (data.agent_response_event) {
+                    response = data.agent_response_event.agent_response;
+                } else if (data.agent_response) {
+                    response = data.agent_response;
+                } else if (data.response) {
+                    response = data.response;
+                } else if (data.message) {
+                    response = data.message;
+                }
+                
+                if (response && response.trim()) {
+                    console.log('🤖 Agent response:', response);
+                    this.addMessage('assistant', response);
+                    
+                    // Ассистент начал отвечать
+                    this.setAgentSpeaking(true);
+                } else {
+                    console.log('🤖 Empty or invalid agent response:', data);
+                }
             }
 
             handleAgentResponseCorrection(data) {
@@ -866,8 +928,15 @@
 
             handleAudioResponse(data) {
                 try {
-                    const audioBase64 = data.audio_event.audio_base_64;
-                    console.log('🔊 Received audio from ElevenLabs agent');
+                    // ElevenLabs отправляет аудио в формате audio_event
+                    const audioBase64 = data.audio_event ? data.audio_event.audio_base_64 : data.audio_base_64;
+                    
+                    if (!audioBase64) {
+                        console.warn('No audio data in response:', data);
+                        return;
+                    }
+                    
+                    console.log('🔊 Received audio from ElevenLabs agent, length:', audioBase64.length);
                     
                     // Ассистент говорит
                     this.setAgentSpeaking(true);
@@ -926,12 +995,39 @@
 
             handleServerError(data) {
                 console.error('❌ ElevenLabs server error:', data);
-                const errorMsg = data.error || data.message || 'Unknown server error';
-                this.addMessage('system', `❌ Ошибка сервера: ${errorMsg}`);
                 
-                if (data.critical || data.fatal) {
+                let errorMsg = 'Unknown server error';
+                let errorCode = 'unknown';
+                
+                if (data.error) {
+                    if (typeof data.error === 'string') {
+                        errorMsg = data.error;
+                    } else if (data.error.message) {
+                        errorMsg = data.error.message;
+                        errorCode = data.error.code || 'unknown';
+                    }
+                } else if (data.message) {
+                    errorMsg = data.message;
+                }
+                
+                this.addMessage('system', `❌ Ошибка ElevenLabs: ${errorMsg}`);
+                
+                // Специальная обработка определенных ошибок
+                if (errorMsg.includes('audio') || errorMsg.includes('format')) {
+                    this.addMessage('system', '💡 Возможная проблема с форматом аудио');
+                    this.addMessage('system', '• Попробуйте обновить страницу');
+                    this.addMessage('system', '• Проверьте настройки микрофона');
+                } else if (errorMsg.includes('quota') || errorMsg.includes('limit')) {
+                    this.addMessage('system', '💡 Превышен лимит использования API');
+                } else if (errorMsg.includes('auth') || errorMsg.includes('key')) {
+                    this.addMessage('system', '💡 Проблема с авторизацией или API ключом');
+                }
+                
+                if (data.critical || data.fatal || errorCode === 'fatal') {
                     this.addMessage('system', '💥 Критичная ошибка, отключение...');
-                    this.disconnect();
+                    setTimeout(() => {
+                        this.disconnect();
+                    }, 2000);
                 }
             }
 
@@ -977,32 +1073,79 @@
                 try {
                     console.log('🎤 Starting continuous audio capture for ElevenLabs...');
                     
-                    // Настраиваем аудио контекст
+                    // Настраиваем аудио контекст с правильными параметрами для ElevenLabs
                     const audioContext = new (window.AudioContext || window.webkitAudioContext)({
                         sampleRate: 16000
                     });
                     
                     const source = audioContext.createMediaStreamSource(this.audioStream);
-                    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+                    const processor = audioContext.createScriptProcessor(1024, 1, 1); // Меньший буфер
+                    
+                    let isProcessing = false;
+                    let audioBuffer = [];
                     
                     processor.onaudioprocess = (event) => {
-                        if (this.ws && this.ws.readyState === WebSocket.OPEN && this.isInitialized) {
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN && this.isInitialized && !isProcessing) {
                             const inputBuffer = event.inputBuffer;
                             const channelData = inputBuffer.getChannelData(0);
                             
-                            // Конвертируем в PCM16 и отправляем в ElevenLabs
-                            const pcmData = this.convertToPCM16(channelData);
-                            const base64Audio = this.arrayBufferToBase64(pcmData);
+                            // Накапливаем аудио данные
+                            audioBuffer.push(new Float32Array(channelData));
                             
-                            // ElevenLabs ожидает аудио в таком формате
-                            const audioMessage = {
-                                user_audio_chunk: base64Audio
-                            };
-                            
-                            try {
-                                this.ws.send(JSON.stringify(audioMessage));
-                            } catch (error) {
-                                console.error('Error sending audio to ElevenLabs:', error);
+                            // Отправляем каждые 100мс (1600 семплов при 16kHz)
+                            if (audioBuffer.length >= 2) { // примерно 128мс
+                                isProcessing = true;
+                                
+                                // Объединяем буферы
+                                const totalLength = audioBuffer.reduce((sum, arr) => sum + arr.length, 0);
+                                const combinedBuffer = new Float32Array(totalLength);
+                                let offset = 0;
+                                
+                                audioBuffer.forEach(arr => {
+                                    combinedBuffer.set(arr, offset);
+                                    offset += arr.length;
+                                });
+                                
+                                // Конвертируем в PCM16 и отправляем
+                                const pcmData = this.convertToPCM16(combinedBuffer);
+                                const base64Audio = this.arrayBufferToBase64(pcmData);
+                                
+                                // ElevenLabs правильный формат сообщения
+                                const audioMessage = {
+                                    user_audio_chunk: base64Audio
+                                };
+                                
+                                try {
+                                    // Диагностика перед отправкой
+                                    if (base64Audio.length === 0) {
+                                        console.warn('Empty audio data, skipping send');
+                                        audioBuffer = [];
+                                        isProcessing = false;
+                                        return;
+                                    }
+                                    
+                                    if (base64Audio.length > 100000) {
+                                        console.warn('Very large audio chunk:', base64Audio.length, 'chars');
+                                    }
+                                    
+                                    this.ws.send(JSON.stringify(audioMessage));
+                                    
+                                    // Логируем только периодически чтобы не засорять консоль
+                                    if (Math.random() < 0.01) { // 1% сообщений
+                                        console.log('📤 Sent audio chunk to ElevenLabs, size:', base64Audio.length, 'chars');
+                                    }
+                                } catch (error) {
+                                    console.error('Error sending audio to ElevenLabs:', error);
+                                    // При ошибке пробуем переподключиться
+                                    if (error.message.includes('WebSocket') || this.ws.readyState !== WebSocket.OPEN) {
+                                        console.warn('WebSocket connection lost, will attempt to reconnect');
+                                        this.addMessage('system', '⚠️ Соединение потеряно, попробуйте переподключиться');
+                                    }
+                                }
+                                
+                                // Очищаем буфер
+                                audioBuffer = [];
+                                isProcessing = false;
                             }
                         }
                     };
@@ -1127,19 +1270,32 @@
                 if (this.isAgentSpeaking && this.ws && this.ws.readyState === WebSocket.OPEN) {
                     console.log('⚡ Manual interrupt triggered');
                     
-                    // Отправляем команду ручного перебивания в ElevenLabs
-                    const interruptMessage = {
-                        type: "interruption",
-                        timestamp: Date.now()
-                    };
-                    
-                    this.ws.send(JSON.stringify(interruptMessage));
+                    // Для ElevenLabs можем попробовать отправить сообщение перебивания
+                    // Но в основном полагаемся на VAD систему ElevenLabs
                     
                     // Локально обрабатываем перебивание
                     this.handleVoiceInterruption({ 
                         type: "interruption",
-                        source: "manual"
+                        source: "manual",
+                        timestamp: Date.now()
                     });
+                    
+                    // Также можно попробовать отправить пустое аудио сообщение
+                    // чтобы "разбудить" VAD систему ElevenLabs
+                    try {
+                        const silenceBuffer = new ArrayBuffer(1024); // Короткий буфер тишины
+                        const base64Silence = this.arrayBufferToBase64(new Uint8Array(silenceBuffer));
+                        
+                        this.ws.send(JSON.stringify({
+                            user_audio_chunk: base64Silence
+                        }));
+                        
+                        console.log('📤 Sent silence audio to trigger ElevenLabs VAD');
+                    } catch (error) {
+                        console.error('Error sending manual interrupt:', error);
+                    }
+                } else {
+                    console.log('⚠️ Cannot interrupt: agent not speaking or connection lost');
                 }
             }
 
@@ -1238,6 +1394,8 @@
                 const reason = event?.reason || 'unknown';
                 
                 console.log('❌ ElevenLabs WebSocket disconnected. Code:', code, 'Reason:', reason);
+                console.log('Full close event:', event);
+                
                 this.isConnected = false;
                 this.isAgentSpeaking = false;
                 
@@ -1257,8 +1415,12 @@
                     systemMessage = '❌ Соединение прервано неожиданно (код 1006)';
                     statusMessage = '🔴 Ошибка соединения';
                 } else if (code === 1008) {
-                    systemMessage = '❌ Нарушение политики (возможно, проблема с аутентификацией)';
-                    statusMessage = '🔴 Ошибка аутентификации';
+                    systemMessage = '❌ Неправильный формат сообщения (код 1008)';
+                    systemMessage += ' - Возможно проблема с форматом аудио данных';
+                    statusMessage = '🔴 Ошибка протокола';
+                } else if (code === 1011) {
+                    systemMessage = '❌ Внутренняя ошибка сервера ElevenLabs (код 1011)';
+                    statusMessage = '🔴 Ошибка сервера';
                 } else if (code !== 1000 && code !== 'unknown') {
                     systemMessage = `❌ Соединение закрыто с кодом: ${code}`;
                     if (reason && reason !== 'unknown') {
@@ -1269,6 +1431,14 @@
                 
                 this.updateStatus('disconnected', statusMessage);
                 this.addMessage('system', systemMessage);
+                
+                // Добавляем советы по исправлению ошибки 1008
+                if (code === 1008) {
+                    this.addMessage('system', '💡 Попробуйте:');
+                    this.addMessage('system', '• Перезагрузить страницу');
+                    this.addMessage('system', '• Проверить настройки микрофона');
+                    this.addMessage('system', '• Использовать другой браузер');
+                }
 
                 this.stopAudioCapture();
             }
