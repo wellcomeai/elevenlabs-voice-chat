@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # API ключи из переменных окружения
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "sk_ad652dd64291b883f60472d7719ba49e82b6a43bbe4f3506")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "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")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "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")
 
 # Конфигурация ассистента
 ASSISTANT_CONFIG = {
