@@ -2,10 +2,10 @@
   "name": "elevenlabs-voice-chat",
   "version": "1.0.0",
   "description": "ElevenLabs Conversational AI WebSocket Client",
-  "main": "server.js",
+  "main": "server-final.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server-final.js",
+    "dev": "node server-final.js"
   },
   "dependencies": {
     "express": "^4.18.2",
