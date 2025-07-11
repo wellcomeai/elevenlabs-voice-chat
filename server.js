@@ -219,35 +219,115 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API endpoint to manually retry agent creation
-app.post('/api/retry-agent', async (req, res) => {
-  console.log('🔄 Manual agent retry requested');
+// Serve test API endpoint
+app.get('/test-api', (req, res) => {
+  res.sendFile(path.join(__dirname, 'test-api.js'));
+});
+
+// API endpoint to run diagnostics
+app.get('/api/diagnostics', async (req, res) => {
+  console.log('🔍 Running API diagnostics...');
   
   try {
-    AGENT_ERROR = null;
-    AGENT_ID = null;
+    // Test 1: Check user account
+    const userResult = await checkAccountStatus();
     
-    await initializeAgent();
+    // Test 2: Try simple TTS
+    const ttsResult = await testSimpleTTS();
     
-    if (AGENT_ID) {
-      res.json({ 
-        success: true, 
-        agent_id: AGENT_ID,
-        message: 'Agent created successfully'
-      });
-    } else {
-      res.status(500).json({ 
-        success: false, 
-        error: AGENT_ERROR || 'Failed to create agent'
-      });
-    }
+    res.json({
+      success: true,
+      tests: {
+        user_check: { status: 'passed', data: userResult },
+        tts_check: { status: 'passed', data: ttsResult }
+      },
+      recommendations: [
+        'API ключ работает',
+        'Попробуйте создать агент вручную через elevenlabs.io',
+        'Возможно, нужен другой план подписки для Conversational AI'
+      ]
+    });
+    
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message
+    console.error('❌ Diagnostics failed:', error.message);
+    
+    let recommendations = [];
+    let issue = 'unknown';
+    
+    if (error.message.includes('401')) {
+      issue = 'authentication';
+      recommendations = [
+        'Проверьте правильность API ключа',
+        'Создайте новый API ключ на elevenlabs.io',
+        'Убедитесь, что ключ имеет нужные разрешения'
+      ];
+    } else if (error.message.includes('402')) {
+      issue = 'payment';
+      recommendations = [
+        'Пополните баланс кредитов',
+        'Обновите план подписки',
+        'Проверьте статус платежа'
+      ];
+    } else if (error.message.includes('403')) {
+      issue = 'permissions';
+      recommendations = [
+        'Нет доступа к Conversational AI',
+        'Обновите план до Creator или выше',
+        'Проверьте разрешения API ключа'
+      ];
+    }
+    
+    res.status(500).json({
+      success: false,
+      issue: issue,
+      error: error.message,
+      recommendations: recommendations
     });
   }
 });
+
+// Test simple TTS to verify basic API access
+async function testSimpleTTS() {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({
+      text: "Test",
+      model_id: "eleven_multilingual_v2"
+    });
+
+    const options = {
+      hostname: API_BASE_URL,
+      port: 443,
+      path: '/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY,
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      if (res.statusCode === 200) {
+        resolve({ status: 'TTS works' });
+      } else {
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          reject(new Error(`TTS Error: ${res.statusCode} - ${data}`));
+        });
+      }
+    });
+
+    req.on('error', (error) => {
+      reject(error);
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
 
 // Start server and initialize agent
 app.listen(PORT, () => {
