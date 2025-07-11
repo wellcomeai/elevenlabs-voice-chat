@@ -76,6 +76,13 @@
             border-left: 4px solid #38a169;
         }
 
+        .status.listening {
+            background: #e6fffa;
+            color: #319795;
+            border-left: 4px solid #319795;
+            animation: listening-pulse 2s infinite;
+        }
+
         .status.speaking {
             background: #ebf8ff;
             color: #3182ce;
@@ -83,9 +90,26 @@
             animation: pulse 1.5s infinite;
         }
 
+        .status.recording {
+            background: #fed7e2;
+            color: #e53e3e;
+            border-left: 4px solid #e53e3e;
+            animation: recording-pulse 1s infinite;
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
+        }
+
+        @keyframes listening-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.02); }
+        }
+
+        @keyframes recording-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.9; transform: scale(1.05); }
         }
 
         .controls {
@@ -127,17 +151,6 @@
         .btn-danger {
             background: linear-gradient(45deg, #ff6b6b, #ee5a52);
             color: white;
-        }
-
-        .btn-recording {
-            background: linear-gradient(45deg, #ff4757, #ff3742);
-            color: white;
-            animation: recording-pulse 1s infinite;
-        }
-
-        @keyframes recording-pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
-            50% { box-shadow: 0 0 0 10px rgba(255, 71, 87, 0); }
         }
 
         .chat-area {
@@ -199,16 +212,26 @@
             background: linear-gradient(45deg, #ff4757, #ff3742);
         }
 
+        .mic-animation.listening {
+            animation: mic-listening 2s infinite;
+            background: linear-gradient(45deg, #2ed573, #1e90ff);
+        }
+
         @keyframes mic-recording {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.1); }
         }
 
+        @keyframes mic-listening {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+        }
+
         .volume-indicator {
             width: 100%;
-            height: 4px;
+            height: 6px;
             background: #e9ecef;
-            border-radius: 2px;
+            border-radius: 3px;
             margin: 1rem 0;
             overflow: hidden;
         }
@@ -216,7 +239,7 @@
         .volume-bar {
             height: 100%;
             background: linear-gradient(45deg, #667eea, #764ba2);
-            border-radius: 2px;
+            border-radius: 3px;
             transition: width 0.1s ease;
             width: 0%;
         }
@@ -227,6 +250,30 @@
             border-top: 1px solid #e9ecef;
             color: #666;
             font-size: 0.9rem;
+        }
+
+        .settings {
+            margin: 1rem 0;
+            text-align: left;
+        }
+
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 0.5rem 0;
+        }
+
+        .setting-row label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .setting-row input {
+            padding: 0.25rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 60px;
         }
 
         @media (max-width: 600px) {
@@ -273,6 +320,17 @@
             <div class="volume-bar" id="volumeBar"></div>
         </div>
 
+        <div class="settings">
+            <div class="setting-row">
+                <label>Порог тишины:</label>
+                <input type="number" id="silenceThreshold" value="30" min="10" max="50">
+            </div>
+            <div class="setting-row">
+                <label>Длительность тишины (мс):</label>
+                <input type="number" id="silenceDuration" value="1500" min="500" max="5000" step="100">
+            </div>
+        </div>
+
         <div class="chat-area" id="chatArea">
             <div class="message system">
                 Нажмите "Подключиться" чтобы начать разговор с ИИ помощником
@@ -298,6 +356,14 @@
                 this.apiKey = null;
                 this.initializationTimeout = null;
                 
+                // Voice Activity Detection
+                this.isRecording = false;
+                this.silenceTimeout = null;
+                this.audioChunks = [];
+                this.silenceThreshold = 30;
+                this.silenceDuration = 1500;
+                this.isAgentSpeaking = false;
+                
                 this.initializeElements();
                 this.loadAgentConfig();
             }
@@ -310,9 +376,20 @@
                 this.micAnimation = document.getElementById('micAnimation');
                 this.volumeBar = document.getElementById('volumeBar');
                 this.agentIdSpan = document.getElementById('agentId');
+                this.silenceThresholdInput = document.getElementById('silenceThreshold');
+                this.silenceDurationInput = document.getElementById('silenceDuration');
 
                 this.connectBtn.addEventListener('click', () => this.connect());
                 this.disconnectBtn.addEventListener('click', () => this.disconnect());
+                
+                // Settings listeners
+                this.silenceThresholdInput.addEventListener('change', (e) => {
+                    this.silenceThreshold = parseInt(e.target.value);
+                });
+                
+                this.silenceDurationInput.addEventListener('change', (e) => {
+                    this.silenceDuration = parseInt(e.target.value);
+                });
             }
 
             async loadAgentConfig() {
@@ -337,7 +414,6 @@
                         this.connectBtn.disabled = true;
                         this.connectBtn.innerHTML = '⏳ Ожидание...';
                         
-                        // Retry after 3 seconds
                         setTimeout(() => {
                             this.loadAgentConfig();
                         }, 3000);
@@ -368,7 +444,6 @@
                     this.connectBtn.disabled = true;
                     this.connectBtn.innerHTML = '❌ Недоступно';
                     
-                    // Retry after 10 seconds
                     setTimeout(() => {
                         this.addMessage('system', '🔄 Повторная попытка загрузки...');
                         this.loadAgentConfig();
@@ -385,17 +460,16 @@
                 try {
                     this.updateStatus('connecting', '🟡 Подключение...');
                     
-                    // Request microphone access
                     this.audioStream = await navigator.mediaDevices.getUserMedia({ 
                         audio: {
                             sampleRate: 16000,
                             channelCount: 1,
                             echoCancellation: true,
-                            noiseSuppression: true
+                            noiseSuppression: true,
+                            autoGainControl: true
                         } 
                     });
 
-                    // ✅ НОВОЕ: Получаем signed URL с сервера
                     this.addMessage('system', '🔐 Получение безопасного URL...');
                     
                     let wsUrl;
@@ -408,7 +482,6 @@
                             console.log('✅ Using signed URL for WebSocket connection');
                             this.addMessage('system', '✅ Безопасный URL получен');
                         } else {
-                            // Fallback to direct connection if signed URL fails
                             const fallbackData = await signedUrlResponse.json();
                             wsUrl = fallbackData.fallback_url || `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
                             console.log('⚠️ Using fallback direct URL');
@@ -420,7 +493,6 @@
                         this.addMessage('system', '⚠️ Используется прямое подключение');
                     }
 
-                    // Initialize WebSocket with obtained URL
                     console.log('🔗 Connecting to WebSocket:', wsUrl);
                     this.addMessage('system', '🔗 Подключение к голосовому агенту...');
                     
@@ -428,7 +500,7 @@
 
                     this.ws.onopen = () => this.onWebSocketOpen();
                     this.ws.onmessage = (event) => this.onWebSocketMessage(event);
-                    this.ws.onclose = () => this.onWebSocketClose();
+                    this.ws.onclose = (event) => this.onWebSocketClose(event);
                     this.ws.onerror = (error) => this.onWebSocketError(error);
 
                 } catch (error) {
@@ -455,13 +527,12 @@
                 this.updateStatus('connecting', '🟡 Инициализация...');
                 this.addMessage('system', '🔗 WebSocket подключен, инициализация...');
                 
-                // ✅ НОВОЕ: Отправляем инициализационное сообщение
                 const initMessage = {
                     type: "conversation_initiation_client_data",
                     conversation_config_override: {
                         agent: {
                             prompt: {
-                                prompt: "Ты дружелюбный русскоговорящий ИИ-помощник. Отвечай на русском языке, будь полезным и вежливым. Говори естественно и используй подходящие паузы в речи."
+                                prompt: "Ты дружелюбный русскоговорящий ИИ-помощник. Отвечай на русском языке, будь полезным и вежливым. Говори естественно и используй подходящие паузы в речи. Отвечай кратко и по делу."
                             },
                             first_message: "Привет! Я ваш ИИ-помощник. Как дела? Чем могу помочь?",
                             language: "ru"
@@ -475,7 +546,6 @@
                 console.log('📤 Sending initialization message:', initMessage);
                 this.ws.send(JSON.stringify(initMessage));
                 
-                // Set timeout for initialization
                 this.initializationTimeout = setTimeout(() => {
                     if (!this.isInitialized) {
                         console.error('Initialization timeout');
@@ -485,7 +555,7 @@
                         this.updateStatus('disconnected', '🔴 Таймаут');
                         this.disconnect();
                     }
-                }, 10000); // 10 second timeout
+                }, 10000);
             }
 
             onWebSocketMessage(event) {
@@ -509,6 +579,12 @@
                         case 'internal_tentative_agent_response':
                             this.handleTentativeResponse(data);
                             break;
+                        case 'agent_response_start':
+                            this.handleAgentResponseStart(data);
+                            break;
+                        case 'agent_response_end':
+                            this.handleAgentResponseEnd(data);
+                            break;
                         default:
                             console.log('Unknown message type:', data.type);
                     }
@@ -518,31 +594,35 @@
             }
 
             onWebSocketClose(event) {
-                console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
+                // Исправляем ошибку: проверяем что event существует
+                const code = event?.code || 'unknown';
+                const reason = event?.reason || 'unknown';
+                
+                console.log('WebSocket disconnected. Code:', code, 'Reason:', reason);
                 this.isConnected = false;
+                this.isAgentSpeaking = false;
                 this.connectBtn.disabled = false;
                 this.disconnectBtn.disabled = true;
-                this.micAnimation.classList.remove('recording');
+                this.micAnimation.classList.remove('recording', 'listening');
 
                 let statusMessage = '🔴 Отключен';
                 let systemMessage = '🔌 Соединение закрыто';
                 
-                // Analyze close codes for better error messages
-                if (event.code === 1000) {
+                if (code === 1000) {
                     systemMessage = '✅ Соединение закрыто нормально';
-                } else if (event.code === 1006) {
+                } else if (code === 1006) {
                     systemMessage = '❌ Соединение прервано неожиданно';
                     statusMessage = '🔴 Ошибка соединения';
-                } else if (event.code === 1011) {
+                } else if (code === 1011) {
                     systemMessage = '❌ Сервер завершил соединение из-за ошибки';
                     statusMessage = '🔴 Ошибка сервера';
-                } else if (event.code === 1008) {
+                } else if (code === 1008) {
                     systemMessage = '❌ Нарушение политики (возможно, проблема с аутентификацией)';
                     statusMessage = '🔴 Ошибка аутентификации';
-                } else if (event.code !== 1000) {
-                    systemMessage = `❌ Соединение закрыто с кодом: ${event.code}`;
-                    if (event.reason) {
-                        systemMessage += ` (${event.reason})`;
+                } else if (code !== 1000 && code !== 'unknown') {
+                    systemMessage = `❌ Соединение закрыто с кодом: ${code}`;
+                    if (reason && reason !== 'unknown') {
+                        systemMessage += ` (${reason})`;
                     }
                     statusMessage = '🔴 Ошибка';
                 }
@@ -553,12 +633,13 @@
                 if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
                     this.mediaRecorder.stop();
                 }
+                
+                this.stopRecording();
             }
 
             onWebSocketError(error) {
                 console.error('WebSocket error:', error);
                 
-                // Более понятные сообщения об ошибках
                 let errorMessage = '❌ Ошибка WebSocket соединения';
                 
                 if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
@@ -569,10 +650,6 @@
                     this.addMessage('system', '• Агент недоступен или отключен');
                     this.addMessage('system', '• Проблемы с сетевым подключением');
                     this.addMessage('system', '• Временные проблемы на сервере ElevenLabs');
-                    this.addMessage('system', '🔄 Попробуйте:');
-                    this.addMessage('system', '• Обновить страницу');
-                    this.addMessage('system', '• Проверить статус агента в ElevenLabs Dashboard');
-                    this.addMessage('system', '• Проверить настройки аутентификации агента');
                 } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                     errorMessage = '❌ Ошибка во время разговора';
                     this.addMessage('system', errorMessage);
@@ -583,8 +660,6 @@
                 }
                 
                 this.updateStatus('disconnected', '🔴 Ошибка соединения');
-                
-                // Reset buttons
                 this.connectBtn.disabled = false;
                 this.disconnectBtn.disabled = true;
             }
@@ -593,23 +668,20 @@
                 const metadata = data.conversation_initiation_metadata_event;
                 console.log('✅ Conversation initiated:', metadata);
                 
-                // Clear initialization timeout
                 if (this.initializationTimeout) {
                     clearTimeout(this.initializationTimeout);
                     this.initializationTimeout = null;
                 }
                 
                 this.isInitialized = true;
-                this.updateStatus('connected', '🟢 Подключен');
+                this.updateStatus('listening', '🟢 Слушаю...');
                 this.addMessage('system', `✅ Разговор начат (ID: ${metadata.conversation_id.substring(0, 8)}...)`);
                 this.addMessage('system', '🎤 Начинайте говорить...');
                 
-                // Enable/disable buttons
                 this.connectBtn.disabled = true;
                 this.disconnectBtn.disabled = false;
                 
-                // Start audio recording after successful initialization
-                this.startAudioRecording();
+                this.startContinuousRecording();
             }
 
             handleUserTranscript(data) {
@@ -622,11 +694,22 @@
             handleAgentResponse(data) {
                 const response = data.agent_response_event.agent_response;
                 this.addMessage('assistant', response);
+            }
+
+            handleAgentResponseStart(data) {
+                this.isAgentSpeaking = true;
                 this.updateStatus('speaking', '🎯 ИИ говорит...');
+                this.micAnimation.classList.remove('recording', 'listening');
+            }
+
+            handleAgentResponseEnd(data) {
+                this.isAgentSpeaking = false;
+                this.updateStatus('listening', '🟢 Слушаю...');
+                this.micAnimation.classList.remove('recording');
+                this.micAnimation.classList.add('listening');
             }
 
             handleTentativeResponse(data) {
-                // Optional: show thinking indicator
                 console.log('Agent thinking:', data.tentative_agent_response_internal_event.tentative_agent_response);
             }
 
@@ -640,14 +723,12 @@
                         audioArray[i] = audioData.charCodeAt(i);
                     }
 
-                    // Create and play audio
                     const audioBlob = new Blob([audioArray], { type: 'audio/pcm' });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     const audio = new Audio(audioUrl);
                     
                     audio.onended = () => {
                         URL.revokeObjectURL(audioUrl);
-                        this.updateStatus('connected', '🟢 Слушаю...');
                     };
                     
                     audio.play().catch(error => {
@@ -659,7 +740,7 @@
                 }
             }
 
-            startAudioRecording() {
+            startContinuousRecording() {
                 if (!this.audioStream) return;
 
                 this.mediaRecorder = new MediaRecorder(this.audioStream, {
@@ -667,8 +748,7 @@
                 });
 
                 this.mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        // Convert to base64 and send
+                    if (event.data.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN && !this.isAgentSpeaking) {
                         const reader = new FileReader();
                         reader.onload = () => {
                             const base64 = reader.result.split(',')[1];
@@ -680,14 +760,12 @@
                     }
                 };
 
-                this.mediaRecorder.start(250); // Send chunks every 250ms
-                this.micAnimation.classList.add('recording');
-                
-                // Add volume visualization
+                this.mediaRecorder.start(100); // Send chunks every 100ms for better responsiveness
                 this.setupVolumeVisualization();
+                this.setupVoiceActivityDetection();
             }
 
-            setupVolumeVisualization() {
+            setupVoiceActivityDetection() {
                 if (!this.audioStream) return;
 
                 this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -698,19 +776,69 @@
                 analyser.fftSize = 256;
                 
                 const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                let silenceStart = null;
                 
-                const updateVolume = () => {
-                    if (!this.isConnected) return;
+                const detectVoiceActivity = () => {
+                    if (!this.isConnected || this.isAgentSpeaking) {
+                        requestAnimationFrame(detectVoiceActivity);
+                        return;
+                    }
                     
                     analyser.getByteFrequencyData(dataArray);
                     const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
                     const percentage = Math.min(100, (average / 128) * 100);
                     
                     this.volumeBar.style.width = percentage + '%';
-                    requestAnimationFrame(updateVolume);
+                    
+                    if (average > this.silenceThreshold) {
+                        // Voice detected
+                        silenceStart = null;
+                        if (!this.isRecording) {
+                            this.startRecording();
+                        }
+                    } else {
+                        // Silence detected
+                        if (this.isRecording && !silenceStart) {
+                            silenceStart = Date.now();
+                        }
+                        
+                        if (this.isRecording && silenceStart && 
+                            (Date.now() - silenceStart) > this.silenceDuration) {
+                            this.stopRecording();
+                            silenceStart = null;
+                        }
+                    }
+                    
+                    requestAnimationFrame(detectVoiceActivity);
                 };
                 
-                updateVolume();
+                detectVoiceActivity();
+            }
+
+            setupVolumeVisualization() {
+                // Volume visualization is handled in setupVoiceActivityDetection
+            }
+
+            startRecording() {
+                if (this.isRecording || this.isAgentSpeaking) return;
+                
+                this.isRecording = true;
+                this.updateStatus('recording', '🔴 Запись...');
+                this.micAnimation.classList.add('recording');
+                this.micAnimation.classList.remove('listening');
+                
+                console.log('🎤 Started recording');
+            }
+
+            stopRecording() {
+                if (!this.isRecording) return;
+                
+                this.isRecording = false;
+                this.updateStatus('listening', '🟢 Слушаю...');
+                this.micAnimation.classList.remove('recording');
+                this.micAnimation.classList.add('listening');
+                
+                console.log('⏸️ Stopped recording');
             }
 
             disconnect() {
@@ -733,9 +861,16 @@
                     this.initializationTimeout = null;
                 }
 
+                if (this.silenceTimeout) {
+                    clearTimeout(this.silenceTimeout);
+                    this.silenceTimeout = null;
+                }
+
                 this.isConnected = false;
                 this.isInitialized = false;
-                this.micAnimation.classList.remove('recording');
+                this.isRecording = false;
+                this.isAgentSpeaking = false;
+                this.micAnimation.classList.remove('recording', 'listening');
                 this.volumeBar.style.width = '0%';
             }
 
@@ -754,7 +889,6 @@
             }
         }
 
-        // Initialize app when page loads
         document.addEventListener('DOMContentLoaded', () => {
             new VoiceChat();
         });
