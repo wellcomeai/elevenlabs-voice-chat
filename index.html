@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎤 ElevenLabs Voice Chat</title>
+    <title>🎤 ElevenLabs Voice Chat v2.0</title>
     <style>
         * {
             margin: 0;
@@ -346,7 +346,7 @@
         
         <div class="header">
             <h1 class="title">🎤 Voice Assistant</h1>
-            <p class="subtitle">Powered by ElevenLabs AI</p>
+            <p class="subtitle">Powered by ElevenLabs AI v2.0</p>
             <div class="status-badge disconnected" id="statusBadge">Подключение...</div>
         </div>
 
@@ -407,13 +407,15 @@
                 this.audioContext = null;
                 this.analyser = null;
                 this.conversationId = null;
+                this.audioQueue = [];
+                this.isPlayingAudio = false;
                 
-                // Настройки
+                // Настройки для PCM аудио (исправлено)
                 this.settings = {
                     autoGainControl: true,
                     noiseSuppression: true,
                     echoCancellation: true,
-                    sampleRate: 16000,
+                    sampleRate: 16000,  // Важно: 16kHz для ElevenLabs
                     chunkInterval: 250
                 };
                 
@@ -555,9 +557,8 @@
                 this.log(`📨 Сервер: ${type}`, data);
                 
                 switch (type) {
-                    case 'conversation_initiation_metadata':
-                        const metadata = data.conversation_initiation_metadata_event;
-                        this.conversationId = metadata.conversation_id;
+                    case 'conversation_ready':
+                        this.conversationId = data.conversation_id;
                         this.updateStatus('connected', 'Готов к разговору! Нажмите для начала');
                         this.mainButton.disabled = false;
                         this.log(`✅ Разговор готов: ${this.conversationId}`);
@@ -565,7 +566,7 @@
                         
                     case 'user_transcript':
                         const transcript = data.user_transcription_event;
-                        if (transcript.user_transcript) {
+                        if (transcript && transcript.user_transcript) {
                             this.addMessage('user', transcript.user_transcript);
                             this.stats.messagesCount++;
                             this.updateStats();
@@ -574,20 +575,28 @@
                         
                     case 'agent_response':
                         const response = data.agent_response_event;
-                        this.addMessage('assistant', response.agent_response);
-                        this.stats.messagesCount++;
-                        this.updateStats();
-                        this.isAgentSpeaking = true;
-                        this.updateUI();
-                        this.statusText.textContent = '🔊 AI говорит...';
+                        if (response && response.agent_response) {
+                            this.addMessage('assistant', response.agent_response);
+                            this.stats.messagesCount++;
+                            this.updateStats();
+                            this.isAgentSpeaking = true;
+                            this.updateUI();
+                            this.statusText.textContent = '🔊 AI говорит...';
+                        }
                         break;
                         
                     case 'audio':
-                        this.playAudio(data.audio_event.audio_base_64);
+                        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: правильная обработка PCM аудио
+                        if (data.audio_data) {
+                            this.playPCMAudio(data.audio_data);
+                        }
                         break;
                         
                     case 'vad_score':
-                        this.updateVAD(data.vad_score_event.vad_score);
+                        const vadEvent = data.vad_score_event;
+                        if (vadEvent) {
+                            this.updateVAD(vadEvent.vad_score);
+                        }
                         break;
                         
                     case 'interruption':
@@ -628,15 +637,14 @@
                     
                     this.startAudioVisualization();
 
-                    // MediaRecorder
+                    // ИСПРАВЛЕНИЕ: используем WAV для лучшей совместимости с PCM
                     this.mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus',
-                        audioBitsPerSecond: 16000
+                        mimeType: 'audio/webm;codecs=opus'
                     });
 
                     this.mediaRecorder.ondataavailable = (event) => {
                         if (event.data.size > 0) {
-                            this.sendAudioChunk(event.data);
+                            this.convertAndSendAudio(event.data);
                         }
                     };
 
@@ -671,11 +679,22 @@
                 this.statusText.textContent = 'Готов к разговору';
             }
 
-            async sendAudioChunk(audioBlob) {
+            // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: конвертация аудио в PCM base64
+            async convertAndSendAudio(audioBlob) {
                 try {
                     const arrayBuffer = await audioBlob.arrayBuffer();
-                    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
                     
+                    // Декодируем аудио через AudioContext
+                    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                    
+                    // Получаем PCM данные (16-bit, 16kHz)
+                    const pcmData = this.resampleTo16kHz(audioBuffer);
+                    const int16Array = this.float32ToInt16(pcmData);
+                    
+                    // Конвертируем в base64
+                    const base64 = this.arrayBufferToBase64(int16Array.buffer);
+                    
+                    // Отправляем в правильном формате
                     this.ws.send(JSON.stringify({
                         type: 'user_audio_chunk',
                         user_audio_chunk: base64
@@ -685,33 +704,99 @@
                     this.updateStats();
                     
                 } catch (error) {
-                    this.log('❌ Ошибка отправки аудио:', error);
+                    this.log('❌ Ошибка конвертации аудио:', error);
                 }
             }
 
-            async playAudio(audioBase64) {
+            // Ресэмплинг до 16kHz
+            resampleTo16kHz(audioBuffer) {
+                const targetSampleRate = 16000;
+                const sourceSampleRate = audioBuffer.sampleRate;
+                
+                if (sourceSampleRate === targetSampleRate) {
+                    return audioBuffer.getChannelData(0);
+                }
+                
+                const ratio = sourceSampleRate / targetSampleRate;
+                const sourceLength = audioBuffer.length;
+                const targetLength = Math.round(sourceLength / ratio);
+                
+                const result = new Float32Array(targetLength);
+                const sourceData = audioBuffer.getChannelData(0);
+                
+                for (let i = 0; i < targetLength; i++) {
+                    const sourceIndex = i * ratio;
+                    const index = Math.floor(sourceIndex);
+                    const fraction = sourceIndex - index;
+                    
+                    if (index + 1 < sourceLength) {
+                        result[i] = sourceData[index] * (1 - fraction) + sourceData[index + 1] * fraction;
+                    } else {
+                        result[i] = sourceData[index];
+                    }
+                }
+                
+                return result;
+            }
+
+            // Конвертация Float32 в Int16
+            float32ToInt16(float32Array) {
+                const int16Array = new Int16Array(float32Array.length);
+                for (let i = 0; i < float32Array.length; i++) {
+                    const sample = Math.max(-1, Math.min(1, float32Array[i]));
+                    int16Array[i] = sample * 0x7FFF;
+                }
+                return int16Array;
+            }
+
+            // Конвертация в base64
+            arrayBufferToBase64(buffer) {
+                const bytes = new Uint8Array(buffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                return btoa(binary);
+            }
+
+            // ИСПРАВЛЕНИЕ: воспроизведение PCM аудио
+            async playPCMAudio(audioBase64) {
                 try {
-                    const audioData = atob(audioBase64);
-                    const audioArray = new Uint8Array(audioData.length);
-                    for (let i = 0; i < audioData.length; i++) {
-                        audioArray[i] = audioData.charCodeAt(i);
+                    // Декодируем base64
+                    const binaryString = atob(audioBase64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
                     }
                     
-                    const audioBlob = new Blob([audioArray], { type: 'audio/mpeg' });
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    const audio = new Audio(audioUrl);
+                    // Создаем AudioBuffer для PCM данных
+                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const int16Array = new Int16Array(bytes.buffer);
+                    const float32Array = new Float32Array(int16Array.length);
                     
-                    audio.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
+                    // Конвертируем Int16 в Float32
+                    for (let i = 0; i < int16Array.length; i++) {
+                        float32Array[i] = int16Array[i] / 0x7FFF;
+                    }
+                    
+                    const audioBuffer = audioContext.createBuffer(1, float32Array.length, 16000);
+                    audioBuffer.getChannelData(0).set(float32Array);
+                    
+                    // Воспроизводим
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioContext.destination);
+                    
+                    source.onended = () => {
                         if (!this.isAgentSpeaking) {
                             this.statusText.textContent = 'Готов к разговору';
                         }
                     };
                     
-                    await audio.play();
+                    source.start();
                     
                 } catch (error) {
-                    this.log('❌ Ошибка воспроизведения:', error);
+                    this.log('❌ Ошибка воспроизведения PCM:', error);
                 }
             }
 
@@ -832,7 +917,7 @@
             }
 
             log(...args) {
-                console.log('[VoiceAssistant]', ...args);
+                console.log('[VoiceAssistant v2.0]', ...args);
             }
         }
 
