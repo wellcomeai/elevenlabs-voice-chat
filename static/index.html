@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElevenLabs Voice Assistant</title>
+    <title>ElevenLabs Voice Assistant - Улучшенная версия</title>
     <style>
         * {
             margin: 0;
@@ -27,7 +27,7 @@
             border-radius: 24px;
             padding: 40px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
-            max-width: 500px;
+            max-width: 600px;
             width: 100%;
             text-align: center;
         }
@@ -116,6 +116,46 @@
             min-height: 24px;
         }
 
+        .debug-info {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #64748b;
+            background: rgba(248, 250, 252, 0.5);
+            padding: 10px;
+            border-radius: 8px;
+            text-align: left;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+
+        .audio-controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .control-button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #e2e8f0;
+            color: #475569;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .control-button:hover {
+            background: #cbd5e1;
+        }
+
+        .control-button.active {
+            background: #4f46e5;
+            color: white;
+        }
+
         .conversation-display {
             margin-top: 40px;
             padding: 25px;
@@ -186,31 +226,26 @@
             display: none;
         }
 
-        .wave-effect {
-            position: absolute;
-            inset: -20px;
-            border: 2px solid currentColor;
-            border-radius: 50%;
-            opacity: 0;
-            animation: wave-expand 2s infinite;
-        }
-
-        @keyframes wave-expand {
-            0% {
-                transform: scale(1);
-                opacity: 0.7;
-            }
-            100% {
-                transform: scale(1.5);
-                opacity: 0;
-            }
-        }
-
-        .intro-text {
-            margin-bottom: 30px;
+        .recording-timer {
+            margin-top: 10px;
             font-size: 18px;
-            color: #64748b;
-            line-height: 1.6;
+            font-weight: 600;
+            color: #ef4444;
+        }
+
+        .audio-level {
+            margin-top: 10px;
+            height: 4px;
+            background: #e2e8f0;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .audio-level-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981, #f59e0b, #ef4444);
+            width: 0%;
+            transition: width 0.1s;
         }
     </style>
 </head>
@@ -219,20 +254,35 @@
         <div class="connection-indicator" id="connectionStatus"></div>
         
         <div class="assistant-header">
-            <h1 class="assistant-title">🎤 Алиса</h1>
-            <p class="assistant-subtitle">Голосовой ассистент на ElevenLabs + GPT</p>
+            <h1 class="assistant-title">🎤 Алиса Pro</h1>
+            <p class="assistant-subtitle">Улучшенный голосовой ассистент</p>
         </div>
 
         <div class="intro-text">
-            Привет! Я Алиса, ваш голосовой помощник. Нажмите на кнопку и начните говорить!
+            Привет! Я Алиса в улучшенной версии. Говорите четко и достаточно громко!
         </div>
 
         <button class="voice-button" id="voiceButton">
             <span id="buttonIcon">🎤</span>
-            <div class="wave-effect"></div>
         </button>
 
+        <div class="recording-timer" id="recordingTimer" style="display: none;">00:00</div>
+        
+        <div class="audio-level">
+            <div class="audio-level-bar" id="audioLevelBar"></div>
+        </div>
+
+        <div class="audio-controls">
+            <button class="control-button" id="echoCancelButton">Эхо: ВКЛ</button>
+            <button class="control-button" id="noiseSuppressionButton">Шумы: ВКЛ</button>
+            <button class="control-button" id="debugButton">Debug: ВЫКЛ</button>
+        </div>
+
         <div class="status-text" id="statusText">Нажмите, чтобы начать разговор</div>
+
+        <div class="debug-info" id="debugInfo" style="display: none;">
+            Debug информация появится здесь...
+        </div>
 
         <div class="conversation-display">
             <div class="conversation-title">💬 Наш разговор</div>
@@ -247,7 +297,7 @@
     </div>
 
     <script>
-        class VoiceAssistant {
+        class ImprovedVoiceAssistant {
             constructor() {
                 this.ws = null;
                 this.isRecording = false;
@@ -257,10 +307,24 @@
                 this.audioChunks = [];
                 this.currentAudio = null;
                 this.audioQueue = [];
+                this.recordingStartTime = null;
+                this.recordingTimer = null;
+                this.audioContext = null;
+                this.analyser = null;
+                this.debugMode = false;
+                
+                // Настройки записи
+                this.recordingSettings = {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    sampleRate: 44100
+                };
 
                 this.initializeElements();
                 this.connectWebSocket();
                 this.bindEvents();
+                this.setupAudioLevelMonitoring();
             }
 
             initializeElements() {
@@ -270,6 +334,14 @@
                 this.connectionStatus = document.getElementById('connectionStatus');
                 this.errorMessage = document.getElementById('errorMessage');
                 this.conversationHistory = document.getElementById('conversationHistory');
+                this.recordingTimer = document.getElementById('recordingTimer');
+                this.audioLevelBar = document.getElementById('audioLevelBar');
+                this.debugInfo = document.getElementById('debugInfo');
+                
+                // Контролы
+                this.echoCancelButton = document.getElementById('echoCancelButton');
+                this.noiseSuppressionButton = document.getElementById('noiseSuppressionButton');
+                this.debugButton = document.getElementById('debugButton');
             }
 
             connectWebSocket() {
@@ -279,23 +351,25 @@
                 this.ws = new WebSocket(wsUrl);
                 
                 this.ws.onopen = () => {
-                    console.log('WebSocket соединение установлено');
+                    this.log('WebSocket соединение установлено');
                     this.updateConnectionStatus(true);
                     this.statusText.textContent = 'Готов к работе! Нажмите для начала';
                 };
                 
                 this.ws.onmessage = (event) => {
-                    this.handleWebSocketMessage(JSON.parse(event.data));
+                    const data = JSON.parse(event.data);
+                    this.log('Получено сообщение:', data);
+                    this.handleWebSocketMessage(data);
                 };
                 
                 this.ws.onclose = () => {
-                    console.log('WebSocket соединение закрыто');
+                    this.log('WebSocket соединение закрыто');
                     this.updateConnectionStatus(false);
                     this.statusText.textContent = 'Соединение потеряно. Обновите страницу';
                 };
                 
                 this.ws.onerror = (error) => {
-                    console.error('WebSocket ошибка:', error);
+                    this.log('WebSocket ошибка:', error);
                     this.showError('Ошибка соединения с сервером');
                 };
             }
@@ -310,87 +384,242 @@
                         this.startRecording();
                     }
                 });
+
+                // Контролы настроек
+                this.echoCancelButton.addEventListener('click', () => {
+                    this.recordingSettings.echoCancellation = !this.recordingSettings.echoCancellation;
+                    this.echoCancelButton.textContent = `Эхо: ${this.recordingSettings.echoCancellation ? 'ВКЛ' : 'ВЫКЛ'}`;
+                    this.echoCancelButton.classList.toggle('active', this.recordingSettings.echoCancellation);
+                });
+
+                this.noiseSuppressionButton.addEventListener('click', () => {
+                    this.recordingSettings.noiseSuppression = !this.recordingSettings.noiseSuppression;
+                    this.noiseSuppressionButton.textContent = `Шумы: ${this.recordingSettings.noiseSuppression ? 'ВКЛ' : 'ВЫКЛ'}`;
+                    this.noiseSuppressionButton.classList.toggle('active', this.recordingSettings.noiseSuppression);
+                });
+
+                this.debugButton.addEventListener('click', () => {
+                    this.debugMode = !this.debugMode;
+                    this.debugButton.textContent = `Debug: ${this.debugMode ? 'ВКЛ' : 'ВЫКЛ'}`;
+                    this.debugButton.classList.toggle('active', this.debugMode);
+                    this.debugInfo.style.display = this.debugMode ? 'block' : 'none';
+                });
+
+                // Клавиши для удобства
+                document.addEventListener('keydown', (event) => {
+                    if (event.code === 'Space' && !this.isProcessing) {
+                        event.preventDefault();
+                        if (!this.isRecording) {
+                            this.startRecording();
+                        }
+                    }
+                });
+
+                document.addEventListener('keyup', (event) => {
+                    if (event.code === 'Space' && this.isRecording) {
+                        event.preventDefault();
+                        this.stopRecording();
+                    }
+                });
+            }
+
+            async setupAudioLevelMonitoring() {
+                try {
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (error) {
+                    this.log('Не удалось создать AudioContext:', error);
+                }
             }
 
             async startRecording() {
                 try {
                     this.clearError();
+                    this.log('Начинаем запись с настройками:', this.recordingSettings);
                     
                     const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                            sampleRate: 44100
-                        }
+                        audio: this.recordingSettings
                     });
 
+                    // Мониторинг уровня звука
+                    if (this.audioContext && this.audioContext.state === 'suspended') {
+                        await this.audioContext.resume();
+                    }
+                    
+                    if (this.audioContext) {
+                        const source = this.audioContext.createMediaStreamSource(stream);
+                        this.analyser = this.audioContext.createAnalyser();
+                        this.analyser.fftSize = 256;
+                        source.connect(this.analyser);
+                        this.startAudioLevelMonitoring();
+                    }
+
+                    // Пробуем разные форматы записи
+                    const mimeTypes = [
+                        'audio/webm;codecs=opus',
+                        'audio/webm',
+                        'audio/ogg;codecs=opus',
+                        'audio/mp4'
+                    ];
+
+                    let selectedMimeType = null;
+                    for (const mimeType of mimeTypes) {
+                        if (MediaRecorder.isTypeSupported(mimeType)) {
+                            selectedMimeType = mimeType;
+                            break;
+                        }
+                    }
+
+                    this.log('Используем MIME тип:', selectedMimeType);
+
                     this.mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: 'audio/webm;codecs=opus'
+                        mimeType: selectedMimeType,
+                        audioBitsPerSecond: 128000
                     });
 
                     this.audioChunks = [];
+                    this.recordingStartTime = Date.now();
 
                     this.mediaRecorder.ondataavailable = (event) => {
                         if (event.data.size > 0) {
                             this.audioChunks.push(event.data);
+                            this.log(`Получен аудио чанк: ${event.data.size} байт`);
                         }
                     };
 
                     this.mediaRecorder.onstop = () => {
                         stream.getTracks().forEach(track => track.stop());
                         this.processAudio();
+                        this.stopAudioLevelMonitoring();
                     };
 
-                    this.mediaRecorder.start();
+                    this.mediaRecorder.start(250); // Чанки по 250мс
                     this.isRecording = true;
                     this.updateUI();
-                    this.statusText.textContent = 'Говорите... Нажмите, чтобы остановить';
+                    this.statusText.textContent = 'Говорите... Нажмите для остановки или используйте пробел';
+                    this.startRecordingTimer();
 
                 } catch (error) {
+                    this.log('Ошибка при получении доступа к микрофону:', error);
                     this.showError('Не удалось получить доступ к микрофону: ' + error.message);
                 }
             }
 
+            startRecordingTimer() {
+                this.recordingTimer.style.display = 'block';
+                this.recordingTimer.textContent = '00:00';
+                
+                this.timer = setInterval(() => {
+                    const elapsed = Date.now() - this.recordingStartTime;
+                    const seconds = Math.floor(elapsed / 1000);
+                    const minutes = Math.floor(seconds / 60);
+                    const remainingSeconds = seconds % 60;
+                    
+                    this.recordingTimer.textContent = 
+                        `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+                }, 100);
+            }
+
+            stopRecordingTimer() {
+                if (this.timer) {
+                    clearInterval(this.timer);
+                    this.timer = null;
+                }
+                this.recordingTimer.style.display = 'none';
+            }
+
+            startAudioLevelMonitoring() {
+                if (!this.analyser) return;
+
+                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                
+                const updateLevel = () => {
+                    if (!this.isRecording) return;
+                    
+                    this.analyser.getByteFrequencyData(dataArray);
+                    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                    const percentage = (average / 255) * 100;
+                    
+                    this.audioLevelBar.style.width = `${percentage}%`;
+                    
+                    requestAnimationFrame(updateLevel);
+                };
+                
+                updateLevel();
+            }
+
+            stopAudioLevelMonitoring() {
+                this.audioLevelBar.style.width = '0%';
+            }
+
             stopRecording() {
                 if (this.mediaRecorder && this.isRecording) {
+                    this.log('Останавливаем запись');
                     this.mediaRecorder.stop();
                     this.isRecording = false;
                     this.isProcessing = true;
+                    this.stopRecordingTimer();
                     this.updateUI();
-                    this.statusText.textContent = 'Обрабатываю...';
+                    this.statusText.textContent = 'Обрабатываю запись...';
                 }
             }
 
             async processAudio() {
                 try {
-                    const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                    const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder.mimeType });
+                    const duration = (Date.now() - this.recordingStartTime) / 1000;
+                    
+                    this.log(`Обрабатываем аудио: размер ${audioBlob.size} байт, длительность ${duration.toFixed(1)}с`);
+                    
+                    // Проверяем минимальные требования
+                    if (audioBlob.size < 1000) {
+                        this.showError('Запись слишком короткая. Попробуйте говорить дольше.');
+                        this.resetState();
+                        return;
+                    }
+
+                    if (duration < 0.5) {
+                        this.showError('Запись слишком короткая. Говорите минимум полсекунды.');
+                        this.resetState();
+                        return;
+                    }
                     
                     // Отправляем аудио на сервер
                     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                         const reader = new FileReader();
                         reader.onload = () => {
                             const audioData = new Uint8Array(reader.result);
+                            this.log(`Отправляем аудио на сервер: ${audioData.length} байт`);
+                            
                             this.ws.send(JSON.stringify({
                                 type: 'audio_data',
-                                data: Array.from(audioData)
+                                data: Array.from(audioData),
+                                metadata: {
+                                    size: audioBlob.size,
+                                    duration: duration,
+                                    mimeType: this.mediaRecorder.mimeType
+                                }
                             }));
                         };
                         reader.readAsArrayBuffer(audioBlob);
+                    } else {
+                        this.showError('Соединение с сервером потеряно');
+                        this.resetState();
                     }
 
                 } catch (error) {
+                    this.log('Ошибка обработки аудио:', error);
                     this.showError('Ошибка обработки аудио: ' + error.message);
                     this.resetState();
                 }
             }
 
             handleWebSocketMessage(data) {
-                console.log('Получено сообщение:', data);
-
                 switch (data.type) {
                     case 'transcription':
                         this.addMessage('user', data.text);
+                        if (data.text.includes('Извините') || data.text.includes('Ошибка')) {
+                            this.showError('Проблема с распознаванием: ' + data.text);
+                        }
                         break;
 
                     case 'response':
@@ -412,6 +641,7 @@
                         break;
 
                     case 'tts_end':
+                        this.log(`TTS завершен. Всего чанков: ${data.total_chunks || 'неизвестно'}`);
                         setTimeout(() => {
                             if (!this.audioQueue.length) {
                                 this.resetState();
@@ -452,16 +682,16 @@
                         }
                     };
 
-                    this.currentAudio.onerror = () => {
+                    this.currentAudio.onerror = (error) => {
+                        this.log('Ошибка воспроизведения аудио:', error);
                         URL.revokeObjectURL(audioUrl);
-                        console.error('Ошибка воспроизведения аудио');
                         this.playAudioQueue();
                     };
 
                     await this.currentAudio.play();
 
                 } catch (error) {
-                    console.error('Ошибка воспроизведения:', error);
+                    this.log('Ошибка воспроизведения:', error);
                     this.playAudioQueue();
                 }
             }
@@ -521,6 +751,8 @@
                 this.isRecording = false;
                 this.isProcessing = false;
                 this.isSpeaking = false;
+                this.stopRecordingTimer();
+                this.stopAudioLevelMonitoring();
                 this.updateUI();
                 this.statusText.textContent = 'Готов к работе! Нажмите для начала';
             }
@@ -534,6 +766,7 @@
             }
 
             showError(message) {
+                this.log('Ошибка:', message);
                 this.errorMessage.textContent = message;
                 this.errorMessage.style.display = 'block';
                 setTimeout(() => {
@@ -544,11 +777,26 @@
             clearError() {
                 this.errorMessage.style.display = 'none';
             }
+
+            log(...args) {
+                console.log(...args);
+                if (this.debugMode) {
+                    const logEntry = args.join(' ');
+                    const time = new Date().toLocaleTimeString();
+                    this.debugInfo.textContent = `${time}: ${logEntry}\n` + this.debugInfo.textContent;
+                    
+                    // Ограничиваем размер лога
+                    const lines = this.debugInfo.textContent.split('\n');
+                    if (lines.length > 20) {
+                        this.debugInfo.textContent = lines.slice(0, 20).join('\n');
+                    }
+                }
+            }
         }
 
-        // Запускаем ассистента при загрузке страницы
+        // Запускаем улучшенного ассистента
         document.addEventListener('DOMContentLoaded', () => {
-            new VoiceAssistant();
+            new ImprovedVoiceAssistant();
         });
     </script>
 </body>
