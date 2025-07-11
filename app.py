@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ElevenLabs Conversational AI WebSocket Server
-Полная версия с улучшенной обработкой ошибок и диагностикой
+Исправленная версия с правильной обработкой аудио
 """
 
 import asyncio
@@ -10,13 +10,13 @@ import logging
 import os
 import uuid
 import time
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
 import aiohttp
 import websockets
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -61,7 +61,7 @@ class ConversationSession:
 # ===== SESSION MANAGER =====
 
 class ElevenLabsManager:
-    """Менеджер сессий ElevenLabs"""
+    """Менеджер сессий ElevenLabs с исправленной обработкой аудио"""
     
     def __init__(self):
         self.sessions: Dict[str, ConversationSession] = {}
@@ -102,48 +102,6 @@ class ElevenLabsManager:
                     error_text = await response.text()
                     raise Exception(f"Signed URL failed: {response.status} - {error_text}")
     
-    async def check_agent_exists(self, agent_id: str = None) -> Dict[str, Any]:
-        """Проверка существования агента"""
-        agent_id = agent_id or ELEVENLABS_AGENT_ID
-        url = f"{ELEVENLABS_API_BASE}/convai/agents/{agent_id}"
-        
-        headers = {'xi-api-key': ELEVENLABS_API_KEY}
-        
-        try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        agent_data = await response.json()
-                        return {
-                            'exists': True,
-                            'agent_id': agent_id,
-                            'status': 'ready',
-                            'data': agent_data
-                        }
-                    elif response.status == 404:
-                        return {
-                            'exists': False,
-                            'agent_id': agent_id,
-                            'status': 'not_found',
-                            'error': 'Agent not found'
-                        }
-                    else:
-                        error_text = await response.text()
-                        return {
-                            'exists': False,
-                            'agent_id': agent_id,
-                            'status': 'error',
-                            'error': f"API error: {response.status} - {error_text}"
-                        }
-        except Exception as e:
-            return {
-                'exists': False,
-                'agent_id': agent_id,
-                'status': 'error',
-                'error': str(e)
-            }
-    
     async def connect_to_elevenlabs(self, session: ConversationSession) -> bool:
         """Подключение к ElevenLabs WebSocket"""
         try:
@@ -158,17 +116,15 @@ class ElevenLabsManager:
             try:
                 signed_url = await self.get_signed_url(session.agent_id)
                 ws_url = signed_url
-                connection_method = "signed"
                 logger.info(f"✅ Signed URL получен для {session.session_id}")
             except Exception as e:
                 logger.warning(f"⚠️ Signed URL недоступен: {e}")
                 ws_url = f"{ELEVENLABS_WS_URL}?agent_id={session.agent_id}"
-                connection_method = "direct"
                 logger.info(f"🔄 Прямое подключение для {session.session_id}")
             
             # Подключение
             extra_headers = {}
-            if connection_method == "direct":
+            if "?" in ws_url and "token=" not in ws_url:
                 extra_headers["xi-api-key"] = ELEVENLABS_API_KEY
             
             session.elevenlabs_ws = await websockets.connect(
@@ -185,7 +141,7 @@ class ElevenLabsManager:
             # Запускаем обработчик сообщений
             asyncio.create_task(self._handle_elevenlabs_messages(session))
             
-            # Отправляем инициализацию
+            # Отправляем инициализацию с правильными параметрами
             await self._send_conversation_initiation(session)
             
             return True
@@ -200,10 +156,16 @@ class ElevenLabsManager:
             return False
     
     async def _send_conversation_initiation(self, session: ConversationSession):
-        """Отправка инициализации"""
+        """Отправка правильной инициализации"""
         try:
+            # Правильная структура инициализации по документации
             initiation_data = {
-                "type": "conversation_initiation_client_data"
+                "type": "conversation_initiation_client_data",
+                "conversation_config_override": {
+                    "agent": {
+                        "language": "en"  # или "ru" для русского
+                    }
+                }
             }
             
             await session.elevenlabs_ws.send(json.dumps(initiation_data))
@@ -228,7 +190,7 @@ class ElevenLabsManager:
             session.state = ConnectionState.ERROR
     
     async def _process_elevenlabs_message(self, session: ConversationSession, data: Dict[str, Any]):
-        """Обработка сообщения от ElevenLabs"""
+        """Исправленная обработка сообщений от ElevenLabs"""
         message_type = data.get("type", "unknown")
         
         if message_type == "conversation_initiation_metadata":
@@ -236,11 +198,36 @@ class ElevenLabsManager:
             session.conversation_id = metadata.get("conversation_id")
             session.state = ConnectionState.INITIALIZED
             
-        elif message_type == "agent_response":
-            session.is_agent_speaking = True
+            logger.info(f"✅ Разговор готов: {session.conversation_id}")
+            await self._send_to_client(session, {
+                "type": "conversation_ready",
+                "conversation_id": session.conversation_id,
+                "message": "Готов к разговору!"
+            })
             
+        elif message_type == "user_transcript":
+            transcript_event = data.get("user_transcription_event", {})
+            if transcript_event.get("user_transcript"):
+                await self._send_to_client(session, data)
+            
+        elif message_type == "agent_response":
+            response_event = data.get("agent_response_event", {})
+            session.is_agent_speaking = True
+            await self._send_to_client(session, data)
+            
+        elif message_type == "audio":
+            # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: правильная обработка аудио
+            audio_event = data.get("audio_event", {})
+            if audio_event.get("audio_base_64"):
+                await self._send_to_client(session, {
+                    "type": "audio",
+                    "audio_data": audio_event["audio_base_64"],
+                    "event_id": audio_event.get("event_id")
+                })
+                
         elif message_type == "interruption":
             session.is_agent_speaking = False
+            await self._send_to_client(session, data)
             
         elif message_type == "ping":
             ping_event = data.get("ping_event", {})
@@ -252,12 +239,16 @@ class ElevenLabsManager:
             }
             await session.elevenlabs_ws.send(json.dumps(pong_response))
             return  # Не отправляем ping клиенту
+            
+        elif message_type == "vad_score":
+            await self._send_to_client(session, data)
         
-        # Отправляем все сообщения клиенту
-        await self._send_to_client(session, data)
+        else:
+            # Отправляем остальные сообщения клиенту
+            await self._send_to_client(session, data)
     
     async def send_audio_to_elevenlabs(self, session: ConversationSession, audio_data: str):
-        """Отправка аудио в ElevenLabs"""
+        """Отправка аудио в ElevenLabs с правильной структурой"""
         try:
             if session.state not in [ConnectionState.CONNECTED, ConnectionState.INITIALIZED]:
                 return
@@ -265,7 +256,10 @@ class ElevenLabsManager:
             if not session.elevenlabs_ws:
                 return
             
-            audio_message = {"user_audio_chunk": audio_data}
+            # Правильная структура по документации
+            audio_message = {
+                "user_audio_chunk": audio_data
+            }
             await session.elevenlabs_ws.send(json.dumps(audio_message))
             
             session.last_activity = time.time()
@@ -303,29 +297,13 @@ class ElevenLabsManager:
             del self.sessions[session_id]
             self.active_connections -= 1
             logger.info(f"🗑️ Сессия закрыта: {session_id}")
-    
-    def get_stats(self) -> Dict[str, Any]:
-        """Статистика сессий"""
-        return {
-            "total_sessions": len(self.sessions),
-            "active_connections": self.active_connections,
-            "sessions": [
-                {
-                    "session_id": s.session_id,
-                    "state": s.state.value,
-                    "conversation_id": s.conversation_id,
-                    "uptime": time.time() - s.created_at
-                }
-                for s in self.sessions.values()
-            ]
-        }
 
 # ===== FASTAPI APPLICATION =====
 
 app = FastAPI(
     title="ElevenLabs Voice Chat",
     description="Голосовой ассистент на базе ElevenLabs Conversational AI",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 app.add_middleware(
@@ -336,7 +314,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Глобальный менеджер
 manager = ElevenLabsManager()
 
 # ===== HTTP ENDPOINTS =====
@@ -363,64 +340,12 @@ async def get_homepage():
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервера"""
-    agent_info = await manager.check_agent_exists()
-    
     return {
-        "status": "healthy" if agent_info['exists'] else "partial",
+        "status": "healthy",
         "timestamp": time.time(),
         "elevenlabs_configured": bool(ELEVENLABS_API_KEY),
         "agent_configured": bool(ELEVENLABS_AGENT_ID),
-        "agent_status": agent_info,
-        "sessions": manager.get_stats()
-    }
-
-@app.get("/api/agent-id")
-async def get_agent_config():
-    """Получение конфигурации агента"""
-    agent_info = await manager.check_agent_exists()
-    
-    return {
-        "agent_id": ELEVENLABS_AGENT_ID,
-        "status": "ready" if agent_info['exists'] else "error",
-        "exists": agent_info['exists'],
-        "timestamp": time.time()
-    }
-
-@app.get("/api/diagnostics")
-async def run_diagnostics():
-    """Диагностика системы"""
-    tests = {}
-    recommendations = []
-    
-    # Проверка API ключа
-    if ELEVENLABS_API_KEY:
-        tests["api_key"] = "passed"
-        recommendations.append("✅ API ключ настроен")
-    else:
-        tests["api_key"] = "failed"
-        recommendations.append("❌ Настройте ELEVENLABS_API_KEY")
-    
-    # Проверка агента
-    agent_info = await manager.check_agent_exists()
-    if agent_info['exists']:
-        tests["agent"] = "passed"
-        recommendations.append("✅ Агент доступен")
-    else:
-        tests["agent"] = "failed"
-        recommendations.append(f"❌ Агент недоступен: {agent_info['error']}")
-    
-    passed = sum(1 for result in tests.values() if result == "passed")
-    total = len(tests)
-    
-    return {
-        "timestamp": time.time(),
-        "tests": tests,
-        "overall": {
-            "health_score": f"{passed}/{total}",
-            "status": "healthy" if passed == total else "partial" if passed > 0 else "unhealthy"
-        },
-        "recommendations": recommendations,
-        "sessions": manager.get_stats()
+        "active_sessions": len(manager.sessions)
     }
 
 # ===== WEBSOCKET ENDPOINT =====
@@ -490,7 +415,7 @@ def main():
         logger.info("💡 Установите: export ELEVENLABS_API_KEY=your_key")
         return
     
-    logger.info("🚀 Запуск ElevenLabs Voice Chat")
+    logger.info("🚀 Запуск ElevenLabs Voice Chat v2.0")
     logger.info(f"🔑 API ключ: {'✅ Настроен' if ELEVENLABS_API_KEY else '❌ Не настроен'}")
     logger.info(f"🤖 Agent ID: {ELEVENLABS_AGENT_ID}")
     logger.info(f"🌐 Сервер: http://localhost:{port}")
