@@ -178,20 +178,30 @@ class ElevenLabsManager:
         """Обработка сообщений от ElevenLabs"""
         try:
             async for message in session.elevenlabs_ws:
-                data = json.loads(message)
-                await self._process_elevenlabs_message(session, data)
-                session.last_activity = time.time()
+                try:
+                    data = json.loads(message)
+                    await self._process_elevenlabs_message(session, data)
+                    session.last_activity = time.time()
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Ошибка JSON: {e} - {message}")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка обработки сообщения: {e}")
                 
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"🔌 ElevenLabs соединение закрыто: {session.session_id}")
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.info(f"🔌 ElevenLabs соединение закрыто: {session.session_id} - {e}")
             session.state = ConnectionState.DISCONNECTED
+        except websockets.exceptions.ConnectionClosedError as e:
+            logger.warning(f"⚠️ ElevenLabs соединение прервано: {session.session_id} - {e}")
+            session.state = ConnectionState.ERROR
         except Exception as e:
-            logger.error(f"❌ Ошибка обработки сообщений: {e}")
+            logger.error(f"❌ Критическая ошибка обработки сообщений: {e}")
             session.state = ConnectionState.ERROR
     
     async def _process_elevenlabs_message(self, session: ConversationSession, data: Dict[str, Any]):
         """Исправленная обработка сообщений от ElevenLabs"""
         message_type = data.get("type", "unknown")
+        
+        logger.debug(f"📨 ElevenLabs сообщение: {message_type} для {session.session_id}")
         
         if message_type == "conversation_initiation_metadata":
             metadata = data.get("conversation_initiation_metadata_event", {})
@@ -205,18 +215,19 @@ class ElevenLabsManager:
                 "message": "Готов к разговору!"
             })
             
+            # Также отправляем оригинальные метаданные
+            await self._send_to_client(session, data)
+            
         elif message_type == "user_transcript":
-            transcript_event = data.get("user_transcription_event", {})
-            if transcript_event.get("user_transcript"):
-                await self._send_to_client(session, data)
+            # Пропускаем через клиент
+            await self._send_to_client(session, data)
             
         elif message_type == "agent_response":
-            response_event = data.get("agent_response_event", {})
             session.is_agent_speaking = True
             await self._send_to_client(session, data)
             
         elif message_type == "audio":
-            # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: правильная обработка аудио
+            # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: правильная передача аудио
             audio_event = data.get("audio_event", {})
             if audio_event.get("audio_base_64"):
                 await self._send_to_client(session, {
@@ -224,7 +235,14 @@ class ElevenLabsManager:
                     "audio_data": audio_event["audio_base_64"],
                     "event_id": audio_event.get("event_id")
                 })
+            else:
+                # Отправляем как есть, если структура другая
+                await self._send_to_client(session, data)
                 
+        elif message_type == "agent_response_correction":
+            # Исправление ответа агента
+            await self._send_to_client(session, data)
+            
         elif message_type == "interruption":
             session.is_agent_speaking = False
             await self._send_to_client(session, data)
@@ -238,13 +256,26 @@ class ElevenLabsManager:
                 "event_id": event_id
             }
             await session.elevenlabs_ws.send(json.dumps(pong_response))
-            return  # Не отправляем ping клиенту
+            # Не отправляем ping/pong клиенту
             
         elif message_type == "vad_score":
             await self._send_to_client(session, data)
+            
+        elif message_type == "internal_tentative_agent_response":
+            # Внутренний предварительный ответ - не отправляем клиенту
+            logger.debug(f"📝 Предварительный ответ: {session.session_id}")
+            
+        elif message_type == "client_tool_call":
+            # Вызов инструмента клиента
+            await self._send_to_client(session, data)
+            
+        elif message_type == "contextual_update":
+            # Контекстное обновление
+            await self._send_to_client(session, data)
         
         else:
-            # Отправляем остальные сообщения клиенту
+            # Отправляем неизвестные сообщения клиенту для отладки
+            logger.warning(f"❓ Неизвестный тип сообщения: {message_type}")
             await self._send_to_client(session, data)
     
     async def send_audio_to_elevenlabs(self, session: ConversationSession, audio_data: str):
@@ -394,10 +425,16 @@ async def handle_client_message(session: ConversationSession, message: Dict[str,
             await manager.send_audio_to_elevenlabs(session, audio_base64)
     
     elif message_type == "ping":
+        # Отвечаем на ping от клиента
         await manager._send_to_client(session, {
             "type": "pong",
             "timestamp": time.time()
         })
+    
+    elif message_type == "pong":
+        # Получили pong от клиента - обновляем активность
+        session.last_activity = time.time()
+        logger.debug(f"📡 Pong получен от {session.session_id}")
     
     else:
         # Пробрасываем остальные сообщения в ElevenLabs
