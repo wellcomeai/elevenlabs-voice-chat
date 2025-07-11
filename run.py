@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Скрипт запуска ElevenLabs Voice Chat
-Проверяет конфигурацию и запускает сервер
+Скрипт запуска ElevenLabs Voice Chat v2.0
+Исправленная версия с проверкой всех зависимостей
 """
 
 import os
@@ -11,7 +11,7 @@ from pathlib import Path
 
 def check_environment():
     """Проверка окружения"""
-    print("🔍 Проверка конфигурации...")
+    print("🔍 Проверка конфигурации ElevenLabs Voice Chat v2.0...")
     
     issues = []
     warnings = []
@@ -26,6 +26,8 @@ def check_environment():
     api_key = os.getenv("ELEVENLABS_API_KEY")
     if not api_key or api_key == "your_api_key_here":
         issues.append("❌ ELEVENLABS_API_KEY не установлен")
+        print("💡 Получите ключ на: https://elevenlabs.io/")
+        print("💡 Перейдите в Profile Settings > API Key")
     else:
         print("✅ ElevenLabs API ключ найден")
         if len(api_key) < 20:
@@ -99,7 +101,7 @@ def print_setup_instructions():
     
     print("\n3️⃣ Или создайте .env файл:")
     print("   ELEVENLABS_API_KEY=your_api_key_here")
-    print("   ELEVENLABS_AGENT_ID=your_agent_id")
+    print("   ELEVENLABS_AGENT_ID=agent_01jzwcew2ferttga9m1zcn3js1")
     
     print("\n4️⃣ Установите зависимости:")
     print("   pip install -r requirements.txt")
@@ -107,7 +109,7 @@ def print_setup_instructions():
 def create_env_template():
     """Создание шаблона .env"""
     if not Path(".env.example").exists():
-        env_content = """# ElevenLabs Voice Chat Configuration
+        env_content = """# ElevenLabs Voice Chat v2.0 Configuration
 ELEVENLABS_API_KEY=your_api_key_here
 ELEVENLABS_AGENT_ID=agent_01jzwcew2ferttga9m1zcn3js1
 PORT=8000
@@ -117,9 +119,22 @@ LOG_LEVEL=info
             f.write(env_content)
         print("✅ Создан .env.example")
 
+def print_fixes():
+    """Вывод информации об исправлениях"""
+    print("\n🔧 ИСПРАВЛЕНИЯ В v2.0:")
+    print("="*50)
+    print("✅ Правильный формат PCM аудио")
+    print("✅ Исправлена обработка audio событий")
+    print("✅ Конвертация WebM → PCM base64")
+    print("✅ Ресэмплинг до 16kHz")
+    print("✅ Правильная структура сообщений")
+    print("✅ Улучшенная обработка ошибок")
+    print("✅ Совместимость с ElevenLabs API")
+
 def main():
     """Основная функция"""
-    print("🚀 ElevenLabs Voice Chat - Запуск")
+    print("🚀 ElevenLabs Voice Chat v2.0 - Запуск")
+    print("🎯 Исправлена проблема 'не слышу ассистента'")
     print("=" * 50)
     
     # Загружаем .env если есть
@@ -130,6 +145,9 @@ def main():
             print("✅ Загружен .env файл")
     except ImportError:
         pass
+    
+    # Показываем исправления
+    print_fixes()
     
     # Проверка окружения
     issues, warnings = check_environment()
@@ -169,17 +187,18 @@ def main():
     print(f"   • Порт: {port}")
     print(f"   • API ключ: {'✅ Настроен' if os.getenv('ELEVENLABS_API_KEY') else '❌ Не настроен'}")
     print(f"   • Agent ID: {os.getenv('ELEVENLABS_AGENT_ID', 'По умолчанию')}")
+    print(f"   • Версия: 2.0 (с исправлениями аудио)")
     
     print(f"\n🔗 После запуска откройте:")
     print(f"   • http://localhost:{port}")
     print(f"   • http://127.0.0.1:{port}")
     
-    print("\n🎯 Возможности:")
-    print("   • Голосовой разговор с AI")
-    print("   • Распознавание речи в реальном времени")
-    print("   • Синтез речи")
-    print("   • Voice Activity Detection")
-    print("   • Обработка перебиваний")
+    print("\n🎯 Новые возможности v2.0:")
+    print("   • PCM аудио формат (16kHz)")
+    print("   • Правильное воспроизведение")
+    print("   • Улучшенная стабильность")
+    print("   • Поддержка ресэмплинга")
+    print("   • Исправленные WebSocket события")
     
     print("\n" + "=" * 50)
     print("🎤 Запуск сервера...")
@@ -194,9 +213,10 @@ def main():
     except Exception as e:
         print(f"\n❌ Ошибка запуска: {e}")
         print("\n💡 Возможные решения:")
-        print("   1. Проверьте API ключ")
+        print("   1. Проверьте API ключ ElevenLabs")
         print("   2. Убедитесь что порт свободен")
         print("   3. Установите зависимости: pip install -r requirements.txt")
+        print("   4. Проверьте доступ к микрофону в браузере")
         sys.exit(1)
 
 if __name__ == "__main__":
