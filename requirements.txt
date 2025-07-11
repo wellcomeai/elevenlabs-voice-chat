@@ -1,22 +1,15 @@
-# ElevenLabs Conversational AI Project Dependencies
-# Минимальный набор для работы с WebSocket API
+# ElevenLabs Voice Chat - Python Dependencies
+# Минимальный набор для работы
 
 # FastAPI и WebSocket сервер
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+
+# WebSocket клиент для ElevenLabs
 websockets==12.0
 
-# HTTP клиент для API запросов
-httpx==0.25.2
+# HTTP клиент для API запросов  
+aiohttp==0.25.2
 
-# Валидация данных
-pydantic==2.5.0
-
-# Работа с файлами
-python-multipart==0.0.6
-
-# Переменные окружения
+# Переменные окружения (опционально)
 python-dotenv==1.0.0
-
-# Для работы с JSON и базовых операций
-# (стандартные библиотеки Python)
