@@ -1,9 +1,9 @@
-# render.yaml - ElevenLabs Conversational AI Deployment
-# Конфигурация для деплоя на Render.com
+# render.yaml - ElevenLabs Conversational AI v2.0 Deployment
+# Исправленная конфигурация для Render.com
 
 services:
   - type: web
-    name: elevenlabs-ai-assistant
+    name: elevenlabs-ai-assistant-v2
     env: python
     plan: starter # Можете изменить на professional для production
     
@@ -12,7 +12,7 @@ services:
     startCommand: python app.py
     
     # Health check
-    healthCheckPath: /api/health
+    healthCheckPath: /health
     
     # Переменные окружения
     envVars:
@@ -39,8 +39,16 @@ services:
     # Регион (опционально)
     # region: oregon
 
-# ВАЖНЫЕ НАСТРОЙКИ:
+# ===== ВАЖНЫЕ НАСТРОЙКИ ДЛЯ v2.0 =====
 # 1. Установите ELEVENLABS_API_KEY в Render Dashboard
 # 2. Получите ключ на: https://elevenlabs.io/
 # 3. ELEVENLABS_AGENT_ID - необязательный (для собственного агента)
-# 4. Для публичного агента код будет работать с демо-агентом
+# 4. v2.0 исправляет проблемы с аудио воспроизведением
+# 5. Поддерживает PCM формат и правильные WebSocket события
+
+# ===== ИЗМЕНЕНИЯ В v2.0 =====
+# - Исправлен формат аудио (PCM 16kHz)
+# - Правильная обработка audio событий
+# - Конвертация WebM в PCM base64
+# - Ресэмплинг аудио до 16kHz
+# - Улучшенная стабильность соединения
