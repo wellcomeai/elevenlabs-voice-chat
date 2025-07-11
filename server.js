@@ -13,6 +13,53 @@ app.use(express.static('.'));
 const ELEVENLABS_API_KEY = 'sk_29b8a29eb2a7e8a62521a36d7c3c34c245d0ca0daaded3da';
 const API_BASE_URL = 'api.elevenlabs.io';
 
+// Function to check account status first
+async function checkAccountStatus() {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: API_BASE_URL,
+      port: 443,
+      path: '/v1/user',
+      method: 'GET',
+      headers: {
+        'xi-api-key': ELEVENLABS_API_KEY
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        console.log(`🔍 Account check response: ${res.statusCode}`);
+        console.log(`📄 Response data: ${data}`);
+        
+        if (res.statusCode === 200) {
+          try {
+            const user = JSON.parse(data);
+            console.log('✅ Account verified:', user.email || 'User');
+            resolve(user);
+          } catch (error) {
+            console.log('✅ Account verified (parsing issue)');
+            resolve({ status: 'ok' });
+          }
+        } else {
+          reject(new Error(`Account Error: ${res.statusCode} - ${data}`));
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      reject(error);
+    });
+
+    req.end();
+  });
+}
+
 // Function to create agent via API
 async function createAgent() {
   const agentConfig = {
@@ -34,6 +81,8 @@ async function createAgent() {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify(agentConfig);
     
+    console.log('🚀 Creating agent with config:', JSON.stringify(agentConfig, null, 2));
+    
     const options = {
       hostname: API_BASE_URL,
       port: 443,
@@ -46,6 +95,8 @@ async function createAgent() {
       }
     };
 
+    console.log('📡 Request options:', JSON.stringify(options, null, 2));
+
     const req = https.request(options, (res) => {
       let data = '';
       
@@ -54,9 +105,13 @@ async function createAgent() {
       });
       
       res.on('end', () => {
+        console.log(`📥 Response status: ${res.statusCode}`);
+        console.log(`📄 Response headers:`, res.headers);
+        console.log(`📄 Response data: ${data}`);
+        
         try {
-          const response = JSON.parse(data);
-          if (res.statusCode === 200) {
+          if (res.statusCode === 200 || res.statusCode === 201) {
+            const response = JSON.parse(data);
             console.log('✅ Agent created successfully:', response.agent_id);
             resolve(response.agent_id);
           } else {
@@ -64,12 +119,15 @@ async function createAgent() {
             reject(new Error(`API Error: ${res.statusCode} - ${data}`));
           }
         } catch (error) {
-          reject(new Error(`Parse Error: ${error.message}`));
+          console.error('❌ Parse error:', error.message);
+          console.error('❌ Raw response:', data);
+          reject(new Error(`Parse Error: ${error.message} - Raw: ${data}`));
         }
       });
     });
 
     req.on('error', (error) => {
+      console.error('❌ Request error:', error);
       reject(error);
     });
 
@@ -78,28 +136,59 @@ async function createAgent() {
   });
 }
 
-// Store agent ID globally
+// Store agent ID and error info globally
 let AGENT_ID = null;
+let AGENT_ERROR = null;
 
 // Initialize agent on startup
 async function initializeAgent() {
   try {
+    console.log('🔍 Checking ElevenLabs account...');
+    await checkAccountStatus();
+    
     console.log('🤖 Creating ElevenLabs agent...');
     AGENT_ID = await createAgent();
     console.log(`🎉 Agent ready with ID: ${AGENT_ID}`);
+    AGENT_ERROR = null;
   } catch (error) {
-    console.error('💥 Failed to create agent:', error.message);
-    // Fallback: try to use existing agent if creation fails
-    console.log('🔄 Using fallback agent configuration...');
+    console.error('💥 Failed to initialize agent:', error.message);
+    AGENT_ERROR = error.message;
+    
+    // Check if it's an authentication error
+    if (error.message.includes('401') || error.message.includes('403')) {
+      AGENT_ERROR = 'Неверный API ключ ElevenLabs или нет доступа к Conversational AI';
+    } else if (error.message.includes('429')) {
+      AGENT_ERROR = 'Превышен лимит запросов. Попробуйте позже';
+    } else if (error.message.includes('402')) {
+      AGENT_ERROR = 'Недостаточно кредитов на аккаунте ElevenLabs';
+    }
+    
+    console.log('🔄 Agent will be available via fallback method...');
   }
 }
 
 // API endpoint to get agent ID
 app.get('/api/agent-id', (req, res) => {
+  console.log(`📡 Agent ID request - AGENT_ID: ${AGENT_ID}, ERROR: ${AGENT_ERROR}`);
+  
   if (AGENT_ID) {
-    res.json({ agent_id: AGENT_ID, api_key: ELEVENLABS_API_KEY });
+    res.json({ 
+      agent_id: AGENT_ID, 
+      api_key: ELEVENLABS_API_KEY,
+      status: 'ready'
+    });
+  } else if (AGENT_ERROR) {
+    res.status(500).json({ 
+      error: 'Agent creation failed', 
+      details: AGENT_ERROR,
+      status: 'error'
+    });
   } else {
-    res.status(500).json({ error: 'Agent not ready yet' });
+    res.status(202).json({ 
+      error: 'Agent is still being created', 
+      details: 'Please wait and try again',
+      status: 'creating'
+    });
   }
 });
 
@@ -108,14 +197,56 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Serve debug page
+app.get('/debug', (req, res) => {
+  res.sendFile(path.join(__dirname, 'debug.html'));
+});
+
+// Handle favicon requests
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end(); // No content
+});
+
 // Health check endpoint for Render
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'OK', 
     message: 'Server is running',
     agent_ready: !!AGENT_ID,
-    agent_id: AGENT_ID
+    agent_id: AGENT_ID,
+    agent_error: AGENT_ERROR,
+    timestamp: new Date().toISOString()
   });
+});
+
+// API endpoint to manually retry agent creation
+app.post('/api/retry-agent', async (req, res) => {
+  console.log('🔄 Manual agent retry requested');
+  
+  try {
+    AGENT_ERROR = null;
+    AGENT_ID = null;
+    
+    await initializeAgent();
+    
+    if (AGENT_ID) {
+      res.json({ 
+        success: true, 
+        agent_id: AGENT_ID,
+        message: 'Agent created successfully'
+      });
+    } else {
+      res.status(500).json({ 
+        success: false, 
+        error: AGENT_ERROR || 'Failed to create agent'
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      error: error.message
+    });
+  }
 });
 
 // Start server and initialize agent
