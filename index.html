@@ -290,11 +290,13 @@
             constructor() {
                 this.ws = null;
                 this.isConnected = false;
+                this.isInitialized = false;
                 this.mediaRecorder = null;
                 this.audioStream = null;
                 this.audioContext = null;
                 this.agentId = null;
                 this.apiKey = null;
+                this.initializationTimeout = null;
                 
                 this.initializeElements();
                 this.loadAgentConfig();
@@ -449,14 +451,41 @@
             onWebSocketOpen() {
                 console.log('WebSocket connected');
                 this.isConnected = true;
-                this.updateStatus('connected', '🟢 Подключен');
-                this.addMessage('system', '🎉 Подключение установлено! Начинайте говорить...');
+                this.isInitialized = false;
+                this.updateStatus('connecting', '🟡 Инициализация...');
+                this.addMessage('system', '🔗 WebSocket подключен, инициализация...');
                 
-                this.connectBtn.disabled = true;
-                this.disconnectBtn.disabled = false;
-
-                // Start audio recording
-                this.startAudioRecording();
+                // ✅ НОВОЕ: Отправляем инициализационное сообщение
+                const initMessage = {
+                    type: "conversation_initiation_client_data",
+                    conversation_config_override: {
+                        agent: {
+                            prompt: {
+                                prompt: "Ты дружелюбный русскоговорящий ИИ-помощник. Отвечай на русском языке, будь полезным и вежливым. Говори естественно и используй подходящие паузы в речи."
+                            },
+                            first_message: "Привет! Я ваш ИИ-помощник. Как дела? Чем могу помочь?",
+                            language: "ru"
+                        },
+                        tts: {
+                            voice_id: "21m00Tcm4TlvDq8ikWAM"
+                        }
+                    }
+                };
+                
+                console.log('📤 Sending initialization message:', initMessage);
+                this.ws.send(JSON.stringify(initMessage));
+                
+                // Set timeout for initialization
+                this.initializationTimeout = setTimeout(() => {
+                    if (!this.isInitialized) {
+                        console.error('Initialization timeout');
+                        this.addMessage('system', '❌ Таймаут инициализации');
+                        this.addMessage('system', '💡 Агент не отвечает на инициализацию');
+                        this.addMessage('system', '🔄 Попробуйте переподключиться');
+                        this.updateStatus('disconnected', '🔴 Таймаут');
+                        this.disconnect();
+                    }
+                }, 10000); // 10 second timeout
             }
 
             onWebSocketMessage(event) {
@@ -488,15 +517,38 @@
                 }
             }
 
-            onWebSocketClose() {
-                console.log('WebSocket disconnected');
+            onWebSocketClose(event) {
+                console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
                 this.isConnected = false;
-                this.updateStatus('disconnected', '🔴 Отключен');
-                this.addMessage('system', '🔌 Соединение закрыто');
-                
                 this.connectBtn.disabled = false;
                 this.disconnectBtn.disabled = true;
                 this.micAnimation.classList.remove('recording');
+
+                let statusMessage = '🔴 Отключен';
+                let systemMessage = '🔌 Соединение закрыто';
+                
+                // Analyze close codes for better error messages
+                if (event.code === 1000) {
+                    systemMessage = '✅ Соединение закрыто нормально';
+                } else if (event.code === 1006) {
+                    systemMessage = '❌ Соединение прервано неожиданно';
+                    statusMessage = '🔴 Ошибка соединения';
+                } else if (event.code === 1011) {
+                    systemMessage = '❌ Сервер завершил соединение из-за ошибки';
+                    statusMessage = '🔴 Ошибка сервера';
+                } else if (event.code === 1008) {
+                    systemMessage = '❌ Нарушение политики (возможно, проблема с аутентификацией)';
+                    statusMessage = '🔴 Ошибка аутентификации';
+                } else if (event.code !== 1000) {
+                    systemMessage = `❌ Соединение закрыто с кодом: ${event.code}`;
+                    if (event.reason) {
+                        systemMessage += ` (${event.reason})`;
+                    }
+                    statusMessage = '🔴 Ошибка';
+                }
+                
+                this.updateStatus('disconnected', statusMessage);
+                this.addMessage('system', systemMessage);
 
                 if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
                     this.mediaRecorder.stop();
@@ -513,22 +565,51 @@
                     errorMessage = '❌ Не удалось подключиться к голосовому агенту';
                     this.addMessage('system', errorMessage);
                     this.addMessage('system', '💡 Возможные причины:');
-                    this.addMessage('system', '• Агент требует дополнительной аутентификации');
+                    this.addMessage('system', '• Проблемы с аутентификацией или токеном');
+                    this.addMessage('system', '• Агент недоступен или отключен');
                     this.addMessage('system', '• Проблемы с сетевым подключением');
                     this.addMessage('system', '• Временные проблемы на сервере ElevenLabs');
-                    this.addMessage('system', '🔄 Попробуйте обновить страницу');
+                    this.addMessage('system', '🔄 Попробуйте:');
+                    this.addMessage('system', '• Обновить страницу');
+                    this.addMessage('system', '• Проверить статус агента в ElevenLabs Dashboard');
+                    this.addMessage('system', '• Проверить настройки аутентификации агента');
+                } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    errorMessage = '❌ Ошибка во время разговора';
+                    this.addMessage('system', errorMessage);
+                    this.addMessage('system', '💡 Попробуйте переподключиться');
                 } else {
                     errorMessage = '❌ Соединение с голосовым агентом прервано';
                     this.addMessage('system', errorMessage);
                 }
                 
                 this.updateStatus('disconnected', '🔴 Ошибка соединения');
+                
+                // Reset buttons
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
             }
 
             handleInitiation(data) {
                 const metadata = data.conversation_initiation_metadata_event;
-                console.log('Conversation initiated:', metadata);
-                this.addMessage('system', `💬 Разговор начат (ID: ${metadata.conversation_id.substring(0, 8)}...)`);
+                console.log('✅ Conversation initiated:', metadata);
+                
+                // Clear initialization timeout
+                if (this.initializationTimeout) {
+                    clearTimeout(this.initializationTimeout);
+                    this.initializationTimeout = null;
+                }
+                
+                this.isInitialized = true;
+                this.updateStatus('connected', '🟢 Подключен');
+                this.addMessage('system', `✅ Разговор начат (ID: ${metadata.conversation_id.substring(0, 8)}...)`);
+                this.addMessage('system', '🎤 Начинайте говорить...');
+                
+                // Enable/disable buttons
+                this.connectBtn.disabled = true;
+                this.disconnectBtn.disabled = false;
+                
+                // Start audio recording after successful initialization
+                this.startAudioRecording();
             }
 
             handleUserTranscript(data) {
@@ -647,7 +728,13 @@
                     this.audioContext = null;
                 }
 
+                if (this.initializationTimeout) {
+                    clearTimeout(this.initializationTimeout);
+                    this.initializationTimeout = null;
+                }
+
                 this.isConnected = false;
+                this.isInitialized = false;
                 this.micAnimation.classList.remove('recording');
                 this.volumeBar.style.width = '0%';
             }
