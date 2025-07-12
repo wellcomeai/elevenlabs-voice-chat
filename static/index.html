@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElevenLabs Voice Assistant - Улучшенная версия</title>
+    <title>ElevenLabs Voice Chat - Direct Connection</title>
     <style>
         * {
             margin: 0;
@@ -16,787 +16,718 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
-            justify-content: center;
             align-items: center;
-            padding: 20px;
+            justify-content: center;
+            color: #333;
         }
 
-        .assistant-container {
+        .container {
             background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            border-radius: 24px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
-            max-width: 600px;
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
             width: 100%;
+            max-width: 600px;
             text-align: center;
         }
 
-        .assistant-header {
-            margin-bottom: 30px;
+        .header {
+            margin-bottom: 2rem;
         }
 
-        .assistant-title {
-            font-size: 32px;
-            font-weight: 700;
-            color: #2d3748;
-            margin-bottom: 8px;
+        .title {
+            font-size: 2rem;
+            font-weight: bold;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
         }
 
-        .assistant-subtitle {
-            font-size: 16px;
-            color: #64748b;
+        .subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .status {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 10px;
             font-weight: 500;
+            transition: all 0.3s ease;
         }
 
-        .voice-button {
-            width: 140px;
-            height: 140px;
-            border-radius: 50%;
+        .status.disconnected {
+            background: #fee;
+            color: #c53030;
+            border-left: 4px solid #c53030;
+        }
+
+        .status.connecting {
+            background: #fef5e7;
+            color: #d69e2e;
+            border-left: 4px solid #d69e2e;
+        }
+
+        .status.connected {
+            background: #f0fff4;
+            color: #38a169;
+            border-left: 4px solid #38a169;
+        }
+
+        .status.listening {
+            background: #e6fffa;
+            color: #319795;
+            border-left: 4px solid #319795;
+            animation: listening-pulse 2s infinite;
+        }
+
+        .status.speaking {
+            background: #ebf8ff;
+            color: #3182ce;
+            border-left: 4px solid #3182ce;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        @keyframes listening-pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.8; transform: scale(1.02); }
+        }
+
+        .controls {
+            margin: 2rem 0;
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 1rem 2rem;
             border: none;
-            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-            color: white;
-            font-size: 32px;
+            border-radius: 50px;
+            font-size: 1rem;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
-            margin: 20px auto;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+            color: white;
+        }
+
+        .chat-area {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            min-height: 200px;
+            max-height: 300px;
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        .message {
+            margin: 0.5rem 0;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+
+        .message.user {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .message.assistant {
+            background: #e9ecef;
+            color: #333;
+            border-left: 3px solid #667eea;
+        }
+
+        .message.system {
+            background: #fff3cd;
+            color: #856404;
+            text-align: center;
+            margin: 0 auto;
+            font-style: italic;
+        }
+
+        .mic-animation {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            margin: 1rem auto;
             display: flex;
             align-items: center;
             justify-content: center;
-            box-shadow: 0 10px 30px rgba(79, 70, 229, 0.3);
+            color: white;
+            font-size: 2rem;
+            transition: all 0.3s ease;
         }
 
-        .voice-button:hover {
-            transform: scale(1.05);
-            box-shadow: 0 15px 40px rgba(79, 70, 229, 0.4);
+        .mic-animation.recording {
+            animation: mic-recording 1.5s infinite;
+            background: linear-gradient(45deg, #ff4757, #ff3742);
         }
 
-        .voice-button:active {
-            transform: scale(0.95);
+        .mic-animation.listening {
+            animation: mic-listening 2s infinite;
+            background: linear-gradient(45deg, #2ed573, #1e90ff);
         }
 
-        .voice-button.recording {
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            animation: pulse 1.5s infinite;
-        }
-
-        .voice-button.processing {
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            animation: spin 1s linear infinite;
-        }
-
-        .voice-button.speaking {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            animation: wave 1s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
+        @keyframes mic-recording {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.1); }
         }
 
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+        @keyframes mic-listening {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
         }
 
-        @keyframes wave {
-            0%, 100% { transform: scale(1); }
-            25% { transform: scale(1.05); }
-            75% { transform: scale(0.95); }
-        }
-
-        .status-text {
-            margin-top: 25px;
-            font-size: 18px;
-            font-weight: 500;
-            color: #475569;
-            min-height: 24px;
-        }
-
-        .debug-info {
-            margin-top: 15px;
-            font-size: 12px;
-            color: #64748b;
-            background: rgba(248, 250, 252, 0.5);
-            padding: 10px;
-            border-radius: 8px;
-            text-align: left;
-            max-height: 100px;
-            overflow-y: auto;
-        }
-
-        .audio-controls {
-            margin: 20px 0;
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .control-button {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 8px;
-            background: #e2e8f0;
-            color: #475569;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-
-        .control-button:hover {
-            background: #cbd5e1;
-        }
-
-        .control-button.active {
-            background: #4f46e5;
-            color: white;
-        }
-
-        .conversation-display {
-            margin-top: 40px;
-            padding: 25px;
-            background: rgba(248, 250, 252, 0.8);
-            border-radius: 16px;
-            min-height: 120px;
-            text-align: left;
-        }
-
-        .conversation-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #334155;
-            margin-bottom: 15px;
-            text-align: center;
-        }
-
-        .message {
-            margin-bottom: 15px;
-            padding: 12px 16px;
-            border-radius: 12px;
-            line-height: 1.5;
-        }
-
-        .message.user {
-            background: linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%);
-            color: #3730a3;
-            margin-left: 20px;
-        }
-
-        .message.assistant {
-            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-            color: #166534;
-            margin-right: 20px;
-        }
-
-        .message-label {
-            font-size: 12px;
-            font-weight: 600;
-            opacity: 0.7;
-            margin-bottom: 4px;
-        }
-
-        .connection-indicator {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #ef4444;
-            transition: all 0.3s ease;
-        }
-
-        .connection-indicator.connected {
-            background: #10b981;
-            box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
-        }
-
-        .error-message {
-            margin-top: 20px;
-            padding: 15px;
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            border-radius: 12px;
-            color: #dc2626;
-            font-size: 14px;
-            display: none;
-        }
-
-        .recording-timer {
-            margin-top: 10px;
-            font-size: 18px;
-            font-weight: 600;
-            color: #ef4444;
-        }
-
-        .audio-level {
-            margin-top: 10px;
-            height: 4px;
-            background: #e2e8f0;
-            border-radius: 2px;
+        .volume-indicator {
+            width: 100%;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            margin: 1rem 0;
             overflow: hidden;
         }
 
-        .audio-level-bar {
+        .volume-bar {
             height: 100%;
-            background: linear-gradient(90deg, #10b981, #f59e0b, #ef4444);
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border-radius: 3px;
+            transition: width 0.1s ease;
             width: 0%;
-            transition: width 0.1s;
+        }
+
+        .footer {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e9ecef;
+            color: #666;
+            font-size: 0.9rem;
         }
     </style>
 </head>
 <body>
-    <div class="assistant-container">
-        <div class="connection-indicator" id="connectionStatus"></div>
-        
-        <div class="assistant-header">
-            <h1 class="assistant-title">🎤 Алиса Pro</h1>
-            <p class="assistant-subtitle">Улучшенный голосовой ассистент</p>
+    <div class="container">
+        <div class="header">
+            <h1 class="title">🎤 ElevenLabs Voice Chat</h1>
+            <p class="subtitle">Direct WebSocket Connection</p>
         </div>
 
-        <div class="intro-text">
-            Привет! Я Алиса в улучшенной версии. Говорите четко и достаточно громко!
+        <div id="status" class="status disconnected">
+            🔴 Отключен
         </div>
 
-        <button class="voice-button" id="voiceButton">
-            <span id="buttonIcon">🎤</span>
-        </button>
-
-        <div class="recording-timer" id="recordingTimer" style="display: none;">00:00</div>
-        
-        <div class="audio-level">
-            <div class="audio-level-bar" id="audioLevelBar"></div>
+        <div class="controls">
+            <button id="connectBtn" class="btn btn-primary">
+                🔗 Подключиться
+            </button>
+            <button id="disconnectBtn" class="btn btn-danger" disabled>
+                ⛔ Отключиться
+            </button>
         </div>
 
-        <div class="audio-controls">
-            <button class="control-button" id="echoCancelButton">Эхо: ВКЛ</button>
-            <button class="control-button" id="noiseSuppressionButton">Шумы: ВКЛ</button>
-            <button class="control-button" id="debugButton">Debug: ВЫКЛ</button>
+        <div class="mic-animation" id="micAnimation">
+            🎤
         </div>
 
-        <div class="status-text" id="statusText">Нажмите, чтобы начать разговор</div>
-
-        <div class="debug-info" id="debugInfo" style="display: none;">
-            Debug информация появится здесь...
+        <div class="volume-indicator">
+            <div class="volume-bar" id="volumeBar"></div>
         </div>
 
-        <div class="conversation-display">
-            <div class="conversation-title">💬 Наш разговор</div>
-            <div id="conversationHistory">
-                <div style="text-align: center; color: #94a3b8; font-style: italic;">
-                    Здесь будет отображаться наша беседа...
-                </div>
+        <div class="chat-area" id="chatArea">
+            <div class="message system">
+                Нажмите "Подключиться" чтобы начать разговор с ИИ помощником
             </div>
         </div>
 
-        <div class="error-message" id="errorMessage"></div>
+        <div class="footer">
+            <p>Agent ID: <span id="agentId">Загрузка...</span></p>
+        </div>
     </div>
 
     <script>
-        class ImprovedVoiceAssistant {
+        class ElevenLabsDirectClient {
             constructor() {
-                this.ws = null;
-                this.isRecording = false;
-                this.isProcessing = false;
-                this.isSpeaking = false;
-                this.mediaRecorder = null;
-                this.audioChunks = [];
-                this.currentAudio = null;
-                this.audioQueue = [];
-                this.recordingStartTime = null;
-                this.recordingTimer = null;
-                this.audioContext = null;
-                this.analyser = null;
-                this.debugMode = false;
+                console.log('🚀 ElevenLabs Direct Client initialized');
                 
-                // Настройки записи
-                this.recordingSettings = {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true,
-                    sampleRate: 44100
-                };
-
+                // Состояние
+                this.ws = null;
+                this.isConnected = false;
+                this.isInitialized = false;
+                this.agentId = null;
+                this.conversationId = null;
+                
+                // Аудио
+                this.audioStream = null;
+                this.audioContext = null;
+                this.audioProcessor = null;
+                this.mediaRecorder = null;
+                this.isAgentSpeaking = false;
+                
                 this.initializeElements();
-                this.connectWebSocket();
-                this.bindEvents();
-                this.setupAudioLevelMonitoring();
+                this.loadAgentConfig();
             }
 
             initializeElements() {
-                this.voiceButton = document.getElementById('voiceButton');
-                this.buttonIcon = document.getElementById('buttonIcon');
-                this.statusText = document.getElementById('statusText');
-                this.connectionStatus = document.getElementById('connectionStatus');
-                this.errorMessage = document.getElementById('errorMessage');
-                this.conversationHistory = document.getElementById('conversationHistory');
-                this.recordingTimer = document.getElementById('recordingTimer');
-                this.audioLevelBar = document.getElementById('audioLevelBar');
-                this.debugInfo = document.getElementById('debugInfo');
-                
-                // Контролы
-                this.echoCancelButton = document.getElementById('echoCancelButton');
-                this.noiseSuppressionButton = document.getElementById('noiseSuppressionButton');
-                this.debugButton = document.getElementById('debugButton');
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.status = document.getElementById('status');
+                this.chatArea = document.getElementById('chatArea');
+                this.micAnimation = document.getElementById('micAnimation');
+                this.volumeBar = document.getElementById('volumeBar');
+                this.agentIdSpan = document.getElementById('agentId');
+
+                this.connectBtn.addEventListener('click', () => this.connect());
+                this.disconnectBtn.addEventListener('click', () => this.disconnect());
             }
 
-            connectWebSocket() {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
-                
-                this.ws = new WebSocket(wsUrl);
-                
-                this.ws.onopen = () => {
-                    this.log('WebSocket соединение установлено');
-                    this.updateConnectionStatus(true);
-                    this.statusText.textContent = 'Готов к работе! Нажмите для начала';
-                };
-                
-                this.ws.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    this.log('Получено сообщение:', data);
-                    this.handleWebSocketMessage(data);
-                };
-                
-                this.ws.onclose = () => {
-                    this.log('WebSocket соединение закрыто');
-                    this.updateConnectionStatus(false);
-                    this.statusText.textContent = 'Соединение потеряно. Обновите страницу';
-                };
-                
-                this.ws.onerror = (error) => {
-                    this.log('WebSocket ошибка:', error);
-                    this.showError('Ошибка соединения с сервером');
-                };
-            }
-
-            bindEvents() {
-                this.voiceButton.addEventListener('click', () => {
-                    if (this.isSpeaking) {
-                        this.stopSpeaking();
-                    } else if (this.isRecording) {
-                        this.stopRecording();
-                    } else {
-                        this.startRecording();
-                    }
-                });
-
-                // Контролы настроек
-                this.echoCancelButton.addEventListener('click', () => {
-                    this.recordingSettings.echoCancellation = !this.recordingSettings.echoCancellation;
-                    this.echoCancelButton.textContent = `Эхо: ${this.recordingSettings.echoCancellation ? 'ВКЛ' : 'ВЫКЛ'}`;
-                    this.echoCancelButton.classList.toggle('active', this.recordingSettings.echoCancellation);
-                });
-
-                this.noiseSuppressionButton.addEventListener('click', () => {
-                    this.recordingSettings.noiseSuppression = !this.recordingSettings.noiseSuppression;
-                    this.noiseSuppressionButton.textContent = `Шумы: ${this.recordingSettings.noiseSuppression ? 'ВКЛ' : 'ВЫКЛ'}`;
-                    this.noiseSuppressionButton.classList.toggle('active', this.recordingSettings.noiseSuppression);
-                });
-
-                this.debugButton.addEventListener('click', () => {
-                    this.debugMode = !this.debugMode;
-                    this.debugButton.textContent = `Debug: ${this.debugMode ? 'ВКЛ' : 'ВЫКЛ'}`;
-                    this.debugButton.classList.toggle('active', this.debugMode);
-                    this.debugInfo.style.display = this.debugMode ? 'block' : 'none';
-                });
-
-                // Клавиши для удобства
-                document.addEventListener('keydown', (event) => {
-                    if (event.code === 'Space' && !this.isProcessing) {
-                        event.preventDefault();
-                        if (!this.isRecording) {
-                            this.startRecording();
-                        }
-                    }
-                });
-
-                document.addEventListener('keyup', (event) => {
-                    if (event.code === 'Space' && this.isRecording) {
-                        event.preventDefault();
-                        this.stopRecording();
-                    }
-                });
-            }
-
-            async setupAudioLevelMonitoring() {
+            async loadAgentConfig() {
                 try {
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log('📡 Loading agent config...');
+                    const response = await fetch('/api/agent-id');
+                    const data = await response.json();
+                    
+                    console.log('Agent config response:', data);
+                    
+                    if (data.agent_id && data.status === 'ready') {
+                        this.agentId = data.agent_id;
+                        this.agentIdSpan.textContent = this.agentId.substring(0, 12) + '...';
+                        this.addMessage('system', `✅ Агент готов (ID: ${this.agentId.substring(0, 8)}...)`);
+                        this.connectBtn.disabled = false;
+                    } else {
+                        throw new Error(data.details || 'Agent not ready');
+                    }
                 } catch (error) {
-                    this.log('Не удалось создать AudioContext:', error);
+                    console.error('Failed to load agent config:', error);
+                    this.addMessage('system', `❌ Ошибка загрузки агента: ${error.message}`);
+                    this.connectBtn.disabled = true;
                 }
+            }
+
+            async connect() {
+                if (!this.agentId) {
+                    this.addMessage('system', '❌ Агент еще не готов');
+                    return;
+                }
+
+                try {
+                    console.log('🚀 Starting connection process');
+                    this.updateStatus('connecting', '🟡 Подключение...');
+                    
+                    // Запрашиваем доступ к микрофону
+                    this.addMessage('system', '🎤 Запрос доступа к микрофону...');
+                    this.audioStream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        } 
+                    });
+
+                    // Получаем signed URL или fallback
+                    this.addMessage('system', '🔐 Получение URL для подключения...');
+                    let wsUrl;
+                    
+                    try {
+                        const signedResponse = await fetch('/api/signed-url');
+                        const signedData = await signedResponse.json();
+                        
+                        if (signedResponse.ok && signedData.signed_url) {
+                            wsUrl = signedData.signed_url;
+                            console.log('✅ Using signed URL');
+                            this.addMessage('system', '✅ Безопасный URL получен');
+                        } else {
+                            wsUrl = signedData.fallback_url || `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
+                            console.log('⚠️ Using fallback URL');
+                            this.addMessage('system', '⚠️ Используется резервное подключение');
+                        }
+                    } catch (error) {
+                        console.error('Failed to get signed URL:', error);
+                        wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${this.agentId}`;
+                        this.addMessage('system', '⚠️ Используется прямое подключение');
+                    }
+
+                    // Подключаемся напрямую к ElevenLabs
+                    console.log('🔗 Connecting to ElevenLabs:', wsUrl);
+                    this.addMessage('system', '🔗 Подключение к ElevenLabs...');
+                    
+                    this.ws = new WebSocket(wsUrl);
+                    
+                    this.ws.onopen = () => this.onWebSocketOpen();
+                    this.ws.onmessage = (event) => this.onWebSocketMessage(event);
+                    this.ws.onclose = (event) => this.onWebSocketClose(event);
+                    this.ws.onerror = (error) => this.onWebSocketError(error);
+
+                } catch (error) {
+                    console.error('Connection failed:', error);
+                    this.addMessage('system', `❌ Ошибка подключения: ${error.message}`);
+                    this.updateStatus('disconnected', '🔴 Отключен');
+                }
+            }
+
+            onWebSocketOpen() {
+                console.log('✅ WebSocket connected to ElevenLabs');
+                this.isConnected = true;
+                this.updateStatus('connecting', '🟡 Инициализация...');
+                this.addMessage('system', '✅ Подключено к ElevenLabs');
+                
+                // Отправляем инициализацию
+                const initMessage = {
+                    type: "conversation_initiation_client_data"
+                };
+                
+                console.log('📤 Sending initialization:', initMessage);
+                this.ws.send(JSON.stringify(initMessage));
+                
+                this.startKeepAlive();
+            }
+
+            onWebSocketMessage(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Received:', data.type);
+
+                    switch (data.type) {
+                        case 'conversation_initiation_metadata':
+                            this.handleInitiation(data);
+                            break;
+                        case 'user_transcript':
+                            this.handleUserTranscript(data);
+                            break;
+                        case 'agent_response':
+                            this.handleAgentResponse(data);
+                            break;
+                        case 'audio':
+                            this.handleAudioResponse(data);
+                            break;
+                        case 'interruption':
+                            this.handleInterruption(data);
+                            break;
+                        case 'error':
+                            this.handleServerError(data);
+                            break;
+                    }
+                } catch (error) {
+                    console.error('Error parsing message:', error);
+                }
+            }
+
+            handleInitiation(data) {
+                const metadata = data.conversation_initiation_metadata_event;
+                console.log('✅ Conversation initiated:', metadata);
+                
+                this.isInitialized = true;
+                this.conversationId = metadata.conversation_id;
+                this.updateStatus('listening', '🟢 Слушаю...');
+                
+                this.addMessage('system', `✅ Разговор начат (ID: ${metadata.conversation_id.substring(0, 8)}...)`);
+                this.addMessage('system', '🎤 Говорите...');
+                
+                this.connectBtn.disabled = true;
+                this.disconnectBtn.disabled = false;
+                
+                this.startRecording();
+            }
+
+            handleUserTranscript(data) {
+                const transcript = data.user_transcription_event.user_transcript;
+                if (transcript.trim()) {
+                    this.addMessage('user', transcript);
+                }
+            }
+
+            handleAgentResponse(data) {
+                const response = data.agent_response_event.agent_response;
+                this.addMessage('assistant', response);
+                this.isAgentSpeaking = true;
+                this.updateStatus('speaking', '🎯 ИИ говорит...');
+            }
+
+            async handleAudioResponse(data) {
+                try {
+                    const audioBase64 = data.audio_event.audio_base_64;
+                    console.log('🔊 Playing audio chunk');
+                    
+                    // Декодируем base64 в бинарные данные
+                    const audioData = atob(audioBase64);
+                    const pcmArray = new Uint8Array(audioData.length);
+                    
+                    for (let i = 0; i < audioData.length; i++) {
+                        pcmArray[i] = audioData.charCodeAt(i);
+                    }
+
+                    // Создаем WAV из PCM
+                    const wavBlob = this.createWavBlob(pcmArray, 16000, 1, 16);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+                    
+                    // Воспроизводим
+                    const audio = new Audio(audioUrl);
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                        if (!this.isAgentSpeaking) {
+                            this.updateStatus('listening', '🟢 Слушаю...');
+                        }
+                    };
+                    
+                    await audio.play();
+                    
+                } catch (error) {
+                    console.error('Error playing audio:', error);
+                }
+            }
+
+            handleInterruption(data) {
+                console.log('⚠️ Interruption detected');
+                this.isAgentSpeaking = false;
+                this.updateStatus('listening', '🟢 Слушаю...');
+                this.addMessage('system', '⚠️ Разговор прерван');
+            }
+
+            handleServerError(data) {
+                console.error('Server error:', data);
+                this.addMessage('system', `❌ Ошибка: ${data.error || 'Unknown error'}`);
+            }
+
+            onWebSocketClose(event) {
+                console.log('WebSocket disconnected:', event);
+                this.isConnected = false;
+                this.updateStatus('disconnected', '🔴 Отключен');
+                this.addMessage('system', '🔌 Соединение закрыто');
+                
+                this.stopRecording();
+                this.stopKeepAlive();
+                
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
+            }
+
+            onWebSocketError(error) {
+                console.error('WebSocket error:', error);
+                this.addMessage('system', '❌ Ошибка соединения');
             }
 
             async startRecording() {
+                if (!this.audioStream) return;
+
                 try {
-                    this.clearError();
-                    this.log('Начинаем запись с настройками:', this.recordingSettings);
+                    console.log('🎤 Starting audio recording...');
                     
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        audio: this.recordingSettings
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
                     });
-
-                    // Мониторинг уровня звука
-                    if (this.audioContext && this.audioContext.state === 'suspended') {
-                        await this.audioContext.resume();
-                    }
                     
-                    if (this.audioContext) {
-                        const source = this.audioContext.createMediaStreamSource(stream);
-                        this.analyser = this.audioContext.createAnalyser();
-                        this.analyser.fftSize = 256;
-                        source.connect(this.analyser);
-                        this.startAudioLevelMonitoring();
-                    }
-
-                    // Пробуем разные форматы записи
-                    const mimeTypes = [
-                        'audio/webm;codecs=opus',
-                        'audio/webm',
-                        'audio/ogg;codecs=opus',
-                        'audio/mp4'
-                    ];
-
-                    let selectedMimeType = null;
-                    for (const mimeType of mimeTypes) {
-                        if (MediaRecorder.isTypeSupported(mimeType)) {
-                            selectedMimeType = mimeType;
-                            break;
-                        }
-                    }
-
-                    this.log('Используем MIME тип:', selectedMimeType);
-
-                    this.mediaRecorder = new MediaRecorder(stream, {
-                        mimeType: selectedMimeType,
-                        audioBitsPerSecond: 128000
-                    });
-
-                    this.audioChunks = [];
-                    this.recordingStartTime = Date.now();
-
-                    this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) {
-                            this.audioChunks.push(event.data);
-                            this.log(`Получен аудио чанк: ${event.data.size} байт`);
+                    const source = this.audioContext.createMediaStreamSource(this.audioStream);
+                    this.audioProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    this.audioProcessor.onaudioprocess = (event) => {
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN && 
+                            !this.isAgentSpeaking && this.isInitialized) {
+                            
+                            const inputBuffer = event.inputBuffer;
+                            const channelData = inputBuffer.getChannelData(0);
+                            
+                            // Конвертируем в PCM16
+                            const pcmData = this.convertToPCM16(channelData);
+                            const base64Audio = this.arrayBufferToBase64(pcmData);
+                            
+                            // Отправляем аудио
+                            const audioMessage = {
+                                user_audio_chunk: base64Audio
+                            };
+                            
+                            this.ws.send(JSON.stringify(audioMessage));
+                            
+                            // Обновляем индикатор громкости
+                            const volume = this.calculateVolume(channelData);
+                            this.volumeBar.style.width = (volume * 100) + '%';
                         }
                     };
-
-                    this.mediaRecorder.onstop = () => {
-                        stream.getTracks().forEach(track => track.stop());
-                        this.processAudio();
-                        this.stopAudioLevelMonitoring();
-                    };
-
-                    this.mediaRecorder.start(250); // Чанки по 250мс
-                    this.isRecording = true;
-                    this.updateUI();
-                    this.statusText.textContent = 'Говорите... Нажмите для остановки или используйте пробел';
-                    this.startRecordingTimer();
-
+                    
+                    source.connect(this.audioProcessor);
+                    this.audioProcessor.connect(this.audioContext.destination);
+                    
+                    this.micAnimation.classList.add('listening');
+                    console.log('✅ Recording started');
+                    
                 } catch (error) {
-                    this.log('Ошибка при получении доступа к микрофону:', error);
-                    this.showError('Не удалось получить доступ к микрофону: ' + error.message);
+                    console.error('Failed to start recording:', error);
+                    this.addMessage('system', `❌ Ошибка записи: ${error.message}`);
                 }
-            }
-
-            startRecordingTimer() {
-                this.recordingTimer.style.display = 'block';
-                this.recordingTimer.textContent = '00:00';
-                
-                this.timer = setInterval(() => {
-                    const elapsed = Date.now() - this.recordingStartTime;
-                    const seconds = Math.floor(elapsed / 1000);
-                    const minutes = Math.floor(seconds / 60);
-                    const remainingSeconds = seconds % 60;
-                    
-                    this.recordingTimer.textContent = 
-                        `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-                }, 100);
-            }
-
-            stopRecordingTimer() {
-                if (this.timer) {
-                    clearInterval(this.timer);
-                    this.timer = null;
-                }
-                this.recordingTimer.style.display = 'none';
-            }
-
-            startAudioLevelMonitoring() {
-                if (!this.analyser) return;
-
-                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
-                
-                const updateLevel = () => {
-                    if (!this.isRecording) return;
-                    
-                    this.analyser.getByteFrequencyData(dataArray);
-                    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
-                    const percentage = (average / 255) * 100;
-                    
-                    this.audioLevelBar.style.width = `${percentage}%`;
-                    
-                    requestAnimationFrame(updateLevel);
-                };
-                
-                updateLevel();
-            }
-
-            stopAudioLevelMonitoring() {
-                this.audioLevelBar.style.width = '0%';
             }
 
             stopRecording() {
-                if (this.mediaRecorder && this.isRecording) {
-                    this.log('Останавливаем запись');
-                    this.mediaRecorder.stop();
-                    this.isRecording = false;
-                    this.isProcessing = true;
-                    this.stopRecordingTimer();
-                    this.updateUI();
-                    this.statusText.textContent = 'Обрабатываю запись...';
+                console.log('🛑 Stopping recording...');
+                
+                if (this.audioProcessor) {
+                    this.audioProcessor.disconnect();
+                    this.audioProcessor = null;
                 }
+                
+                if (this.audioContext && this.audioContext.state !== 'closed') {
+                    this.audioContext.close();
+                    this.audioContext = null;
+                }
+                
+                this.micAnimation.classList.remove('listening', 'recording');
+                this.volumeBar.style.width = '0%';
             }
 
-            async processAudio() {
-                try {
-                    const audioBlob = new Blob(this.audioChunks, { type: this.mediaRecorder.mimeType });
-                    const duration = (Date.now() - this.recordingStartTime) / 1000;
-                    
-                    this.log(`Обрабатываем аудио: размер ${audioBlob.size} байт, длительность ${duration.toFixed(1)}с`);
-                    
-                    // Проверяем минимальные требования
-                    if (audioBlob.size < 1000) {
-                        this.showError('Запись слишком короткая. Попробуйте говорить дольше.');
-                        this.resetState();
-                        return;
-                    }
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                }
+                
+                if (this.audioStream) {
+                    this.audioStream.getTracks().forEach(track => track.stop());
+                    this.audioStream = null;
+                }
+                
+                this.stopRecording();
+                this.stopKeepAlive();
+                
+                this.isConnected = false;
+                this.isInitialized = false;
+                this.isAgentSpeaking = false;
+            }
 
-                    if (duration < 0.5) {
-                        this.showError('Запись слишком короткая. Говорите минимум полсекунды.');
-                        this.resetState();
-                        return;
-                    }
-                    
-                    // Отправляем аудио на сервер
+            startKeepAlive() {
+                this.keepAliveInterval = setInterval(() => {
                     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        const reader = new FileReader();
-                        reader.onload = () => {
-                            const audioData = new Uint8Array(reader.result);
-                            this.log(`Отправляем аудио на сервер: ${audioData.length} байт`);
-                            
-                            this.ws.send(JSON.stringify({
-                                type: 'audio_data',
-                                data: Array.from(audioData),
-                                metadata: {
-                                    size: audioBlob.size,
-                                    duration: duration,
-                                    mimeType: this.mediaRecorder.mimeType
-                                }
-                            }));
-                        };
-                        reader.readAsArrayBuffer(audioBlob);
-                    } else {
-                        this.showError('Соединение с сервером потеряно');
-                        this.resetState();
+                        this.ws.send(JSON.stringify({ type: "keep_alive" }));
+                        console.log('💓 Keep-alive sent');
                     }
+                }, 15000);
+            }
 
-                } catch (error) {
-                    this.log('Ошибка обработки аудио:', error);
-                    this.showError('Ошибка обработки аудио: ' + error.message);
-                    this.resetState();
+            stopKeepAlive() {
+                if (this.keepAliveInterval) {
+                    clearInterval(this.keepAliveInterval);
+                    this.keepAliveInterval = null;
                 }
             }
 
-            handleWebSocketMessage(data) {
-                switch (data.type) {
-                    case 'transcription':
-                        this.addMessage('user', data.text);
-                        if (data.text.includes('Извините') || data.text.includes('Ошибка')) {
-                            this.showError('Проблема с распознаванием: ' + data.text);
-                        }
-                        break;
-
-                    case 'response':
-                        this.addMessage('assistant', data.text);
-                        break;
-
-                    case 'tts_start':
-                        this.isSpeaking = true;
-                        this.updateUI();
-                        this.statusText.textContent = 'Говорю... Нажмите для прерывания';
-                        this.audioQueue = [];
-                        break;
-
-                    case 'audio_chunk':
-                        this.audioQueue.push(data.audio);
-                        if (this.audioQueue.length === 1) {
-                            this.playAudioQueue();
-                        }
-                        break;
-
-                    case 'tts_end':
-                        this.log(`TTS завершен. Всего чанков: ${data.total_chunks || 'неизвестно'}`);
-                        setTimeout(() => {
-                            if (!this.audioQueue.length) {
-                                this.resetState();
-                            }
-                        }, 1000);
-                        break;
-
-                    case 'processing_complete':
-                        this.isProcessing = false;
-                        this.updateUI();
-                        break;
-
-                    case 'error':
-                        this.showError(data.message);
-                        this.resetState();
-                        break;
-                }
-            }
-
-            async playAudioQueue() {
-                if (!this.audioQueue.length || !this.isSpeaking) return;
-
-                try {
-                    const audioData = this.audioQueue.shift();
-                    const audioBlob = new Blob([
-                        Uint8Array.from(atob(audioData), c => c.charCodeAt(0))
-                    ], { type: 'audio/mpeg' });
-
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    this.currentAudio = new Audio(audioUrl);
-
-                    this.currentAudio.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
-                        if (this.audioQueue.length > 0) {
-                            this.playAudioQueue();
-                        } else if (!this.isSpeaking) {
-                            this.resetState();
-                        }
-                    };
-
-                    this.currentAudio.onerror = (error) => {
-                        this.log('Ошибка воспроизведения аудио:', error);
-                        URL.revokeObjectURL(audioUrl);
-                        this.playAudioQueue();
-                    };
-
-                    await this.currentAudio.play();
-
-                } catch (error) {
-                    this.log('Ошибка воспроизведения:', error);
-                    this.playAudioQueue();
-                }
-            }
-
-            stopSpeaking() {
-                this.isSpeaking = false;
-                this.audioQueue = [];
+            convertToPCM16(float32Array) {
+                const buffer = new ArrayBuffer(float32Array.length * 2);
+                const view = new DataView(buffer);
                 
-                if (this.currentAudio) {
-                    this.currentAudio.pause();
-                    this.currentAudio.currentTime = 0;
+                for (let i = 0; i < float32Array.length; i++) {
+                    let sample = Math.max(-1, Math.min(1, float32Array[i]));
+                    const pcmSample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    view.setInt16(i * 2, pcmSample, true);
                 }
                 
-                this.resetState();
+                return new Uint8Array(buffer);
             }
 
-            addMessage(role, text) {
-                if (role === 'user' && this.conversationHistory.innerHTML.includes('Здесь будет')) {
-                    this.conversationHistory.innerHTML = '';
+            arrayBufferToBase64(buffer) {
+                let binary = '';
+                const bytes = new Uint8Array(buffer);
+                const len = bytes.byteLength;
+                
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
                 }
-
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `message ${role}`;
                 
-                const labelDiv = document.createElement('div');
-                labelDiv.className = 'message-label';
-                labelDiv.textContent = role === 'user' ? 'Вы:' : 'Алиса:';
-                
-                const textDiv = document.createElement('div');
-                textDiv.textContent = text;
-                
-                messageDiv.appendChild(labelDiv);
-                messageDiv.appendChild(textDiv);
-                
-                this.conversationHistory.appendChild(messageDiv);
-                this.conversationHistory.scrollTop = this.conversationHistory.scrollHeight;
+                return btoa(binary);
             }
 
-            updateUI() {
-                this.voiceButton.className = 'voice-button';
-
-                if (this.isRecording) {
-                    this.voiceButton.classList.add('recording');
-                    this.buttonIcon.textContent = '⏹️';
-                } else if (this.isProcessing) {
-                    this.voiceButton.classList.add('processing');
-                    this.buttonIcon.textContent = '⚙️';
-                } else if (this.isSpeaking) {
-                    this.voiceButton.classList.add('speaking');
-                    this.buttonIcon.textContent = '🔊';
-                } else {
-                    this.buttonIcon.textContent = '🎤';
+            calculateVolume(channelData) {
+                let sum = 0;
+                for (let i = 0; i < channelData.length; i++) {
+                    sum += channelData[i] * channelData[i];
                 }
+                
+                const rms = Math.sqrt(sum / channelData.length);
+                return Math.min(1, rms * 10);
             }
 
-            resetState() {
-                this.isRecording = false;
-                this.isProcessing = false;
-                this.isSpeaking = false;
-                this.stopRecordingTimer();
-                this.stopAudioLevelMonitoring();
-                this.updateUI();
-                this.statusText.textContent = 'Готов к работе! Нажмите для начала';
-            }
-
-            updateConnectionStatus(connected) {
-                if (connected) {
-                    this.connectionStatus.classList.add('connected');
-                } else {
-                    this.connectionStatus.classList.remove('connected');
-                }
-            }
-
-            showError(message) {
-                this.log('Ошибка:', message);
-                this.errorMessage.textContent = message;
-                this.errorMessage.style.display = 'block';
-                setTimeout(() => {
-                    this.errorMessage.style.display = 'none';
-                }, 5000);
-            }
-
-            clearError() {
-                this.errorMessage.style.display = 'none';
-            }
-
-            log(...args) {
-                console.log(...args);
-                if (this.debugMode) {
-                    const logEntry = args.join(' ');
-                    const time = new Date().toLocaleTimeString();
-                    this.debugInfo.textContent = `${time}: ${logEntry}\n` + this.debugInfo.textContent;
-                    
-                    // Ограничиваем размер лога
-                    const lines = this.debugInfo.textContent.split('\n');
-                    if (lines.length > 20) {
-                        this.debugInfo.textContent = lines.slice(0, 20).join('\n');
+            createWavBlob(pcmArray, sampleRate, numChannels, bitsPerSample) {
+                const length = pcmArray.length;
+                const arrayBuffer = new ArrayBuffer(44 + length);
+                const view = new DataView(arrayBuffer);
+                
+                const writeString = (offset, string) => {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(offset + i, string.charCodeAt(i));
                     }
+                };
+                
+                writeString(0, 'RIFF');
+                view.setUint32(4, 36 + length, true);
+                writeString(8, 'WAVE');
+                writeString(12, 'fmt ');
+                view.setUint32(16, 16, true);
+                view.setUint16(20, 1, true);
+                view.setUint16(22, numChannels, true);
+                view.setUint32(24, sampleRate, true);
+                view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+                view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+                view.setUint16(34, bitsPerSample, true);
+                writeString(36, 'data');
+                view.setUint32(40, length, true);
+                
+                for (let i = 0; i < length; i++) {
+                    view.setUint8(44 + i, pcmArray[i]);
                 }
+                
+                return new Blob([arrayBuffer], { type: 'audio/wav' });
+            }
+
+            updateStatus(className, text) {
+                this.status.className = `status ${className}`;
+                this.status.textContent = text;
+            }
+
+            addMessage(type, content) {
+                const message = document.createElement('div');
+                message.className = `message ${type}`;
+                message.textContent = content;
+                
+                this.chatArea.appendChild(message);
+                this.chatArea.scrollTop = this.chatArea.scrollHeight;
             }
         }
 
-        // Запускаем улучшенного ассистента
+        // Инициализация
         document.addEventListener('DOMContentLoaded', () => {
-            new ImprovedVoiceAssistant();
+            window.elevenLabsClient = new ElevenLabsDirectClient();
         });
     </script>
 </body>
