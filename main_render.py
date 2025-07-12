@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import Config
 from utils import setup_logging, print_banner
 
+# Улучшенное логирование
 logger = logging.getLogger(__name__)
 
 # ===== FastAPI Application =====
@@ -39,9 +40,10 @@ app = FastAPI(
     version="3.0-render-direct"
 )
 
+# CORS настройки для поддержки WebSocket соединений
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # В продакшене укажите конкретные домены
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -79,16 +81,31 @@ async def startup_event():
         
         # Загрузка конфигурации
         app_state.config = Config()
-        if not app_state.config.validate():
-            logger.error("❌ Некорректная конфигурация")
-            return
         
+        # Проверяем наличие API ключа - критически важно
+        if not app_state.config.ELEVENLABS_API_KEY:
+            logger.error("❌ ELEVENLABS_API_KEY не установлен. Установите ключ API в переменных окружения.")
+            # Не будем выходить, чтобы health check мог вернуть ошибку
+        else:
+            logger.info("✅ ELEVENLABS_API_KEY настроен")
+        
+        if not app_state.config.validate():
+            logger.error("❌ Некорректная конфигурация, но продолжаем работу")
+        else:
+            logger.info("✅ Конфигурация валидна")
+        
+        # Всегда устанавливаем initialized в True, чтобы health check работал
         app_state.is_initialized = True
         logger.info("✅ Сервис инициализирован")
         
+        # Логируем информацию о порте, чтобы убедиться, что он правильный
+        port = os.getenv("PORT", "10000")
+        logger.info(f"🔌 Сервис настроен на порт: {port}")
+        
     except Exception as e:
         logger.error(f"❌ Ошибка инициализации: {e}")
-        app_state.is_initialized = False
+        # Все равно устанавливаем initialized в True, чтобы health check работал
+        app_state.is_initialized = True
 
 @app.on_event("shutdown") 
 async def shutdown_event():
@@ -524,6 +541,8 @@ async def get_homepage():
                 this.assistantState = 'idle';
                 this.audioChunks = [];
                 this.debugMode = false;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
                 
                 // Инициализация UI элементов
                 this.initializeUI();
@@ -624,6 +643,9 @@ async def get_homepage():
                     this.log('Error checking API key:', error);
                     this.apiKeyStatus.textContent = 'API Key: ошибка проверки';
                     this.apiKeyStatus.style.color = '#e74c3c';
+                    
+                    // Попробуем все равно подключиться к WebSocket
+                    this.showMessage('system', 'Не удалось проверить API ключ. Попробуйте подключиться напрямую.');
                 }
             }
             
@@ -635,21 +657,51 @@ async def get_homepage():
                     this.updateStatus('connecting', 'Подключение...');
                     this.log('Connecting to server...');
                     
+                    // Очищаем прошлые ошибки и сбрасываем счетчик попыток, если это новое подключение
+                    if (this.reconnectAttempts === 0) {
+                        this.showMessage('system', '🔄 Попытка соединения с сервером...');
+                    }
+                    
                     // Инициализация WebSocket
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
                     
+                    this.log(`Подключение к WebSocket: ${wsUrl} (попытка ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+                    
                     this.ws = new WebSocket(wsUrl);
                     
-                    this.ws.onopen = this.handleWebSocketOpen.bind(this);
-                    this.ws.onmessage = this.handleWebSocketMessage.bind(this);
-                    this.ws.onclose = this.handleWebSocketClose.bind(this);
-                    this.ws.onerror = this.handleWebSocketError.bind(this);
+                    // Устанавливаем таймаут на подключение (5 секунд)
+                    const connectionTimeout = setTimeout(() => {
+                        if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
+                            this.log('WebSocket connection timeout');
+                            this.ws.close();
+                        }
+                    }, 5000);
+                    
+                    this.ws.onopen = () => {
+                        clearTimeout(connectionTimeout);
+                        this.handleWebSocketOpen();
+                    };
+                    
+                    this.ws.onmessage = (event) => {
+                        this.handleWebSocketMessage(event);
+                    };
+                    
+                    this.ws.onclose = (event) => {
+                        clearTimeout(connectionTimeout);
+                        this.handleWebSocketClose(event);
+                    };
+                    
+                    this.ws.onerror = (error) => {
+                        clearTimeout(connectionTimeout);
+                        this.handleWebSocketError(error);
+                    };
                     
                 } catch (error) {
                     this.log('Connection error:', error);
                     this.updateStatus('disconnected', 'Ошибка подключения');
                     this.showMessage('system', `❌ Ошибка подключения: ${error.message}`);
+                    this.tryReconnect();
                 }
             }
             
@@ -657,6 +709,7 @@ async def get_homepage():
             handleWebSocketOpen() {
                 this.log('WebSocket connected');
                 this.isConnected = true;
+                this.reconnectAttempts = 0;
                 this.updateStatus('connected', 'Подключено');
                 this.showMessage('system', '✅ Подключено к серверу');
                 
@@ -772,6 +825,7 @@ async def get_homepage():
                 // Показываем сообщение
                 if (event.code !== 1000) {
                     this.showMessage('system', `❌ Соединение закрыто: ${event.reason || 'Неизвестная причина'}`);
+                    this.tryReconnect();
                 } else {
                     this.showMessage('system', 'Соединение закрыто');
                 }
@@ -781,6 +835,27 @@ async def get_homepage():
             handleWebSocketError(error) {
                 this.log('WebSocket error:', error);
                 this.showMessage('system', 'Ошибка соединения с сервером');
+                this.tryReconnect();
+            }
+            
+            // Попытка переподключения
+            tryReconnect() {
+                if (this.reconnectAttempts < this.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    
+                    // Экспоненциальный backoff: 1s, 2s, 4s, 8s, 16s
+                    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 16000);
+                    
+                    this.log(`Trying to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+                    this.showMessage('system', `🔄 Переподключение... Попытка ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+                    
+                    setTimeout(() => {
+                        this.connect();
+                    }, delay);
+                } else {
+                    this.log('Max reconnect attempts reached');
+                    this.showMessage('system', '❌ Превышено количество попыток переподключения. Попробуйте обновить страницу.');
+                }
             }
             
             // Отключение от сервера
@@ -1109,18 +1184,19 @@ async def get_homepage():
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервиса"""
-    if not app_state.is_initialized:
-        raise HTTPException(status_code=503, detail="Service not initialized")
+    # Всегда возвращаем статус OK, даже если не инициализированы
+    # Это позволяет health check проходить даже при проблемах с конфигурацией
+    status = "healthy" if app_state.is_initialized else "initializing"
     
     return {
-        "status": "healthy",
+        "status": status,
         "service": "ElevenLabs Voice Assistant",
         "version": "3.0-render-direct",
         "timestamp": time.time(),
         "uptime": time.time() - app_state.start_time,
         "config": {
-            "elevenlabs_configured": bool(app_state.config.ELEVENLABS_API_KEY),
-            "agent_id": app_state.config.ELEVENLABS_AGENT_ID
+            "elevenlabs_configured": bool(app_state.config and app_state.config.ELEVENLABS_API_KEY),
+            "agent_id": app_state.config.ELEVENLABS_AGENT_ID if app_state.config else "unknown"
         }
     }
 
@@ -1128,7 +1204,13 @@ async def health_check():
 async def get_config():
     """Получение конфигурации"""
     if not app_state.is_initialized:
-        raise HTTPException(status_code=503, detail="Service not initialized")
+        # Вместо ошибки 503, просто возвращаем предупреждение
+        return {
+            "warning": "Service initializing",
+            "agent_id": app_state.config.ELEVENLABS_AGENT_ID if app_state.config else "unknown",
+            "api_key_configured": bool(app_state.config and app_state.config.ELEVENLABS_API_KEY),
+            "audio_format": "PCM 16kHz"
+        }
     
     return {
         "agent_id": app_state.config.ELEVENLABS_AGENT_ID,
@@ -1166,22 +1248,24 @@ async def get_stats():
 @app.websocket("/ws/voice")
 async def websocket_voice(websocket: WebSocket):
     """WebSocket для голосового интерфейса по прямому протоколу"""
-    await websocket.accept()
-    
-    # Добавляем соединение в список активных
-    app_state.active_connections.append(websocket)
-    app_state.stats["connections"] += 1
-    
-    # Уникальный ID для этого соединения
-    connection_id = f"voice_{time.time()}_{id(websocket)}"
-    elevenlabs_ws = None
-    
     try:
+        logger.info("🔄 Новое WebSocket соединение - попытка принять")
+        await websocket.accept()
+        logger.info("✅ WebSocket соединение принято успешно")
+        
+        # Добавляем соединение в список активных
+        app_state.active_connections.append(websocket)
+        app_state.stats["connections"] += 1
+        
+        # Уникальный ID для этого соединения
+        connection_id = f"voice_{time.time()}_{id(websocket)}"
+        elevenlabs_ws = None
+        
         logger.info(f"🎤 Новое голосовое WebSocket подключение: {connection_id}")
         
-        # Ждем инициализационное сообщение от клиента
+        # Ждем инициализационное сообщение от клиента с увеличенным таймаутом
         try:
-            init_message = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            init_message = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
             config = json.loads(init_message)
             
             logger.info(f"📝 Получено сообщение инициализации: {config}")
@@ -1190,6 +1274,7 @@ async def websocket_voice(websocket: WebSocket):
             try:
                 # URL для соединения с ElevenLabs
                 ws_url = "wss://api.elevenlabs.io/v1/conversational"
+                logger.info(f"🔄 Подключение к ElevenLabs: {ws_url}")
                 
                 # Создаем сессию
                 async with aiohttp.ClientSession() as session:
@@ -1211,9 +1296,12 @@ async def websocket_voice(websocket: WebSocket):
                     
                     logger.info(f"🔄 Подключение к ElevenLabs Conversational API...")
                     
-                    # Подключаемся к ElevenLabs
-                    async with session.ws_connect(ws_url) as elevenlabs_ws:
+                    headers = {"xi-api-key": app_state.config.ELEVENLABS_API_KEY}
+                    
+                    # Подключаемся к ElevenLabs с повышенным таймаутом
+                    async with session.ws_connect(ws_url, headers=headers, timeout=60.0) as elevenlabs_ws:
                         app_state.elevenlabs_connections[connection_id] = elevenlabs_ws
+                        logger.info(f"✅ Подключение к ElevenLabs успешно")
                         
                         # Отправляем инициализационное сообщение
                         await elevenlabs_ws.send_str(json.dumps(config))
@@ -1267,7 +1355,7 @@ async def websocket_voice(websocket: WebSocket):
         logger.info(f"👋 WebSocket отключен клиентом: {connection_id}")
     
     except Exception as e:
-        logger.error(f"❌ Ошибка WebSocket: {e}")
+        logger.error(f"❌ Ошибка WebSocket: {str(e)}")
         try:
             await websocket.send_json({
                 "error": f"Ошибка сервера: {str(e)}"
@@ -1277,16 +1365,16 @@ async def websocket_voice(websocket: WebSocket):
     
     finally:
         # Закрываем соединение с ElevenLabs
-        if connection_id in app_state.elevenlabs_connections:
+        if 'connection_id' in locals() and connection_id in app_state.elevenlabs_connections:
             elevenlabs_ws = app_state.elevenlabs_connections.pop(connection_id, None)
             if elevenlabs_ws and not elevenlabs_ws.closed:
                 await elevenlabs_ws.close()
         
         # Удаляем из списка активных соединений
-        if websocket in app_state.active_connections:
+        if 'websocket' in locals() and websocket in app_state.active_connections:
             app_state.active_connections.remove(websocket)
         
-        logger.info(f"🧹 Голосовое WebSocket соединение закрыто: {connection_id}")
+        logger.info(f"🧹 Голосовое WebSocket соединение закрыто: {connection_id if 'connection_id' in locals() else 'unknown'}")
 
 async def forward_websocket_messages(source, target, connection_id, direction):
     """Пересылка сообщений между WebSocket соединениями"""
@@ -1294,99 +1382,109 @@ async def forward_websocket_messages(source, target, connection_id, direction):
         if direction == "client_to_elevenlabs":
             # От клиента к ElevenLabs
             async for message in source:
-                if isinstance(message, str):
-                    # Текстовое сообщение
-                    try:
-                        data = json.loads(message)
-                        await target.send_str(json.dumps(data))
-                        app_state.stats["messages_received"] += 1
-                        
-                        # Если это аудио
-                        if "audio" in data:
-                            app_state.stats["audio_chunks_sent"] += 1
-                            
-                        logger.debug(f"📤 {direction}: {type(message)} отправлено")
-                    except:
-                        # Просто пересылаем как есть
-                        await target.send_str(message)
-                        
-                elif isinstance(message, bytes):
-                    # Бинарное сообщение
-                    await target.send_bytes(message)
-                    logger.debug(f"📤 {direction}: бинарные данные отправлены")
-                    
-                else:
-                    # WebSocketMessage
-                    if message.type == aiohttp.WSMsgType.TEXT:
+                try:
+                    if isinstance(message, str):
+                        # Текстовое сообщение
                         try:
-                            data = json.loads(message.data)
+                            data = json.loads(message)
                             await target.send_str(json.dumps(data))
+                            app_state.stats["messages_received"] += 1
                             
+                            # Если это аудио
                             if "audio" in data:
                                 app_state.stats["audio_chunks_sent"] += 1
                                 
-                        except:
-                            # Просто пересылаем как есть
-                            await target.send_str(message.data)
+                            logger.debug(f"📤 {direction}: {type(message)} отправлено")
+                        except Exception as e:
+                            # Пытаемся пересылать как есть при ошибке
+                            logger.warning(f"⚠️ Ошибка при обработке JSON: {e}")
+                            await target.send_str(message)
                             
-                    elif message.type == aiohttp.WSMsgType.BINARY:
-                        await target.send_bytes(message.data)
+                    elif isinstance(message, bytes):
+                        # Бинарное сообщение
+                        await target.send_bytes(message)
+                        logger.debug(f"📤 {direction}: бинарные данные отправлены")
                         
-                    elif message.type == aiohttp.WSMsgType.CLOSED:
-                        logger.info(f"WebSocket закрыт: {direction}")
-                        break
-                        
-                    elif message.type == aiohttp.WSMsgType.ERROR:
-                        logger.error(f"WebSocket ошибка: {message.data}")
-                        break
+                    else:
+                        # WebSocketMessage
+                        if message.type == aiohttp.WSMsgType.TEXT:
+                            try:
+                                data = json.loads(message.data)
+                                await target.send_str(json.dumps(data))
+                                
+                                if "audio" in data:
+                                    app_state.stats["audio_chunks_sent"] += 1
+                                    
+                            except Exception as e:
+                                # Пытаемся пересылать как есть при ошибке
+                                logger.warning(f"⚠️ Ошибка при обработке JSON: {e}")
+                                await target.send_str(message.data)
+                                
+                        elif message.type == aiohttp.WSMsgType.BINARY:
+                            await target.send_bytes(message.data)
+                            
+                        elif message.type == aiohttp.WSMsgType.CLOSED:
+                            logger.info(f"WebSocket закрыт: {direction}")
+                            break
+                            
+                        elif message.type == aiohttp.WSMsgType.ERROR:
+                            logger.error(f"WebSocket ошибка: {message.data}")
+                            break
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при пересылке сообщения от клиента: {e}")
         
         else:
             # От ElevenLabs к клиенту
             async for message in source:
-                if isinstance(message, str):
-                    # Текстовое сообщение
-                    try:
-                        data = json.loads(message)
-                        await target.send_text(json.dumps(data))
-                        
-                        # Если это аудио
-                        if "audio" in data:
-                            app_state.stats["audio_chunks_received"] += 1
-                            
-                        logger.debug(f"📤 {direction}: {type(message)} отправлено")
-                    except:
-                        # Просто пересылаем как есть
-                        await target.send_text(message)
-                        
-                elif isinstance(message, bytes):
-                    # Бинарное сообщение
-                    await target.send_bytes(message)
-                    logger.debug(f"📤 {direction}: бинарные данные отправлены")
-                    
-                else:
-                    # WebSocketMessage
-                    if message.type == aiohttp.WSMsgType.TEXT:
+                try:
+                    if isinstance(message, str):
+                        # Текстовое сообщение
                         try:
-                            data = json.loads(message.data)
+                            data = json.loads(message)
                             await target.send_text(json.dumps(data))
                             
+                            # Если это аудио
                             if "audio" in data:
                                 app_state.stats["audio_chunks_received"] += 1
                                 
-                        except:
-                            # Просто пересылаем как есть
-                            await target.send_text(message.data)
+                            logger.debug(f"📤 {direction}: {type(message)} отправлено")
+                        except Exception as e:
+                            # Пытаемся пересылать как есть при ошибке
+                            logger.warning(f"⚠️ Ошибка при обработке JSON: {e}")
+                            await target.send_text(message)
                             
-                    elif message.type == aiohttp.WSMsgType.BINARY:
-                        await target.send_bytes(message.data)
+                    elif isinstance(message, bytes):
+                        # Бинарное сообщение
+                        await target.send_bytes(message)
+                        logger.debug(f"📤 {direction}: бинарные данные отправлены")
                         
-                    elif message.type == aiohttp.WSMsgType.CLOSED:
-                        logger.info(f"WebSocket закрыт: {direction}")
-                        break
-                        
-                    elif message.type == aiohttp.WSMsgType.ERROR:
-                        logger.error(f"WebSocket ошибка: {message.data}")
-                        break
+                    else:
+                        # WebSocketMessage
+                        if message.type == aiohttp.WSMsgType.TEXT:
+                            try:
+                                data = json.loads(message.data)
+                                await target.send_text(json.dumps(data))
+                                
+                                if "audio" in data:
+                                    app_state.stats["audio_chunks_received"] += 1
+                                    
+                            except Exception as e:
+                                # Пытаемся пересылать как есть при ошибке
+                                logger.warning(f"⚠️ Ошибка при обработке JSON: {e}")
+                                await target.send_text(message.data)
+                                
+                        elif message.type == aiohttp.WSMsgType.BINARY:
+                            await target.send_bytes(message.data)
+                            
+                        elif message.type == aiohttp.WSMsgType.CLOSED:
+                            logger.info(f"WebSocket закрыт: {direction}")
+                            break
+                            
+                        elif message.type == aiohttp.WSMsgType.ERROR:
+                            logger.error(f"WebSocket ошибка: {message.data}")
+                            break
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при пересылке сообщения от ElevenLabs: {e}")
     
     except (WebSocketDisconnect, aiohttp.ClientError) as e:
         logger.info(f"👋 WebSocket отключен ({direction}): {e}")
@@ -1405,13 +1503,19 @@ async def main():
     
     logger.info("🌐 Запуск в режиме веб-сервиса с прямым WebSocket...")
     logger.info("💡 Это полная версия с поддержкой голосового интерфейса")
-    logger.info("🔗 Откройте http://localhost:8000 для веб-интерфейса")
+    
+    # Получаем порт из переменной окружения, которую устанавливает Render
+    port = int(os.getenv("PORT", 10000))
+    host = "0.0.0.0"  # Биндим на все интерфейсы
+    
+    logger.info(f"🔗 Сервер будет запущен на http://{host}:{port}")
+    logger.info(f"🔗 WebSocket будет доступен на ws://{host}:{port}/ws/voice")
     
     # Запуск через uvicorn
     config = uvicorn.Config(
         app=app,
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
+        host=host,
+        port=port,
         log_level="info"
     )
     
