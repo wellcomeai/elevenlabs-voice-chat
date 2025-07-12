@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ElevenLabs Conversational AI - Render.com Version с аудио в браузере
+ElevenLabs Conversational AI - Render.com Version с прямым WebSocket
 """
 
 import asyncio
@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import json
+import base64
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -34,8 +35,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="ElevenLabs Voice Assistant",
-    description="Облачная версия голосового ассистента ElevenLabs с поддержкой аудио в браузере",
-    version="3.0-render-audio"
+    description="Облачная версия голосового ассистента ElevenLabs с прямым WebSocket",
+    version="3.0-render-direct"
 )
 
 app.add_middleware(
@@ -45,12 +46,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Загружаем HTML и статические файлы
-try:
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-except Exception as e:
-    logger.warning(f"Не удалось смонтировать статические файлы: {e}")
 
 # ===== Global State =====
 
@@ -80,7 +75,7 @@ app_state = AppState()
 async def startup_event():
     """Инициализация при запуске"""
     try:
-        logger.info("🚀 Запуск ElevenLabs сервиса с поддержкой аудио в браузере...")
+        logger.info("🚀 Запуск ElevenLabs сервиса с прямым WebSocket...")
         
         # Загрузка конфигурации
         app_state.config = Config()
@@ -121,482 +116,816 @@ async def shutdown_event():
 @app.get("/", response_class=HTMLResponse)
 async def get_homepage():
     """Главная страница с аудио интерфейсом"""
-    try:
-        with open(Path(__file__).parent / "static" / "index.html") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        # Возвращаем встроенный HTML если файл не найден
-        return HTMLResponse(content="""
+    return HTMLResponse(content="""
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElevenLabs Voice Assistant</title>
+    <title>ElevenLabs Conversational AI</title>
     <style>
-        body { 
-            font-family: 'Inter', -apple-system, sans-serif; 
-            margin: 0; 
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            margin: 0;
             padding: 0;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            display: flex; 
+            display: flex;
             justify-content: center;
             align-items: center;
+            color: #333;
         }
-        .container { 
-            max-width: 800px; 
+        
+        .container {
+            max-width: 700px;
             width: 90%;
-            margin: 20px auto; 
-            background: white; 
-            padding: 30px; 
-            border-radius: 15px; 
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2); 
-        }
-        .title { 
-            color: #333; 
-            text-align: center; 
-            margin-bottom: 20px; 
-        }
-        .status { 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin: 15px 0; 
-            font-weight: 500;
-        }
-        .status.ok { 
-            background: #d4edda; 
-            color: #155724; 
-        }
-        .status.error { 
-            background: #f8d7da; 
-            color: #721c24; 
-        }
-        .chat-interface {
-            margin-top: 30px;
-            border: 1px solid #e0e0e0;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        .chat-messages {
-            height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-            background: #f9f9f9;
-        }
-        .message {
-            margin-bottom: 15px;
-            padding: 10px 15px;
-            border-radius: 10px;
-            max-width: 80%;
-        }
-        .user-message {
-            background: #e3f2fd;
-            margin-left: auto;
-            text-align: right;
-        }
-        .bot-message {
-            background: #f1f8e9;
-        }
-        .chat-input {
-            display: flex;
-            padding: 10px;
-            background: #fff;
-            border-top: 1px solid #e0e0e0;
-        }
-        .chat-input input {
-            flex: 1;
-            padding: 10px 15px;
-            border: 1px solid #ddd;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
             border-radius: 20px;
-            outline: none;
+            padding: 30px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            margin: 20px;
         }
-        .chat-input button {
-            margin-left: 10px;
-            padding: 10px 20px;
-            background: #4f46e5;
-            color: white;
-            border: none;
-            border-radius: 20px;
-            cursor: pointer;
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
         }
-        .chat-input button:hover {
-            background: #3730a3;
-        }
-        .mic-button {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
+        
+        .title {
+            font-size: 2.2rem;
+            margin-bottom: 5px;
             background: linear-gradient(45deg, #667eea, #764ba2);
-            margin: 20px auto;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 30px;
-            cursor: pointer;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 1rem;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin: 15px 0;
+            text-align: center;
             transition: all 0.3s ease;
         }
-        .mic-button:hover {
-            transform: scale(1.05);
+        
+        .status-badge.disconnected {
+            background: linear-gradient(to right, #ff6b6b, #ee5253);
+            color: white;
         }
-        .mic-button.recording {
-            background: linear-gradient(45deg, #f44336, #d32f2f);
+        
+        .status-badge.connecting {
+            background: linear-gradient(to right, #f7b731, #f7971e);
+            color: white;
             animation: pulse 1.5s infinite;
         }
+        
+        .status-badge.connected {
+            background: linear-gradient(to right, #2ecc71, #1abc9c);
+            color: white;
+        }
+        
+        .status-badge.speaking {
+            background: linear-gradient(to right, #00cec9, #0984e3);
+            color: white;
+            animation: speaking-pulse 1.5s infinite;
+        }
+        
+        .status-badge.listening {
+            background: linear-gradient(to right, #6c5ce7, #74b9ff);
+            color: white;
+            animation: listening-pulse 2s infinite;
+        }
+        
+        .status-badge.thinking {
+            background: linear-gradient(to right, #a29bfe, #74b9ff);
+            color: white;
+            animation: thinking-pulse 1.5s infinite;
+        }
+        
         @keyframes pulse {
+            0%, 100% { opacity: 0.8; }
+            50% { opacity: 1; }
+        }
+        
+        @keyframes speaking-pulse {
             0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
+            50% { transform: scale(1.03); }
         }
-        .volume-bar {
-            height: 4px;
-            background: #e0e0e0;
-            border-radius: 2px;
-            margin: 10px 0;
+        
+        @keyframes listening-pulse {
+            0%, 100% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.05); opacity: 1; }
+        }
+        
+        @keyframes thinking-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+        
+        .microphone-btn {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            font-size: 3rem;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 30px auto;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .microphone-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .microphone-btn.listening {
+            background: linear-gradient(135deg, #6c5ce7, #74b9ff);
+            animation: mic-pulse 1.5s infinite;
+        }
+        
+        .microphone-btn.speaking {
+            background: linear-gradient(135deg, #00cec9, #0984e3);
+            animation: mic-wave 1s infinite;
+        }
+        
+        .microphone-btn.thinking {
+            background: linear-gradient(135deg, #a29bfe, #74b9ff);
+            animation: mic-thinking 1.5s infinite;
+        }
+        
+        @keyframes mic-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+        
+        @keyframes mic-wave {
+            0%, 100% { transform: scale(1); }
+            25% { transform: scale(1.03); }
+            75% { transform: scale(0.97); }
+        }
+        
+        @keyframes mic-thinking {
+            0%, 100% { box-shadow: 0 0 0 rgba(108, 92, 231, 0.4); }
+            50% { box-shadow: 0 0 30px rgba(108, 92, 231, 0.6); }
+        }
+        
+        .volume-meter {
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
             overflow: hidden;
+            margin: 20px auto;
+            max-width: 400px;
         }
+        
         .volume-level {
             height: 100%;
             width: 0%;
-            background: linear-gradient(90deg, #667eea, #764ba2);
+            background: linear-gradient(to right, #667eea, #764ba2);
+            border-radius: 3px;
             transition: width 0.1s ease;
+        }
+        
+        .conversation {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 30px 0;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            max-width: 80%;
+            line-height: 1.4;
+        }
+        
+        .message.user {
+            background: #e3f2fd;
+            margin-left: auto;
+            text-align: right;
+            color: #0a58ca;
+        }
+        
+        .message.assistant {
+            background: #e9e5fd;
+            color: #5d48c9;
+            border-left: 3px solid #6c5ce7;
+        }
+        
+        .message.system {
+            background: #fff3cd;
+            color: #856404;
+            text-align: center;
+            font-style: italic;
+            margin: 10px auto;
+            max-width: 90%;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border-radius: 50px;
+            border: none;
+            background: #f0f0f0;
+            color: #333;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .btn:hover {
+            background: #e0e0e0;
+            transform: translateY(-2px);
+        }
+        
+        .btn.primary {
+            background: linear-gradient(to right, #667eea, #764ba2);
+            color: white;
+        }
+        
+        .btn.primary:hover {
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .settings {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+        
+        .settings h3 {
+            color: #666;
+            font-size: 1rem;
+            margin-bottom: 15px;
+        }
+        
+        .setting-group {
+            margin-bottom: 15px;
+        }
+        
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .setting-label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        select, input {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            background: #f9f9f9;
+            font-size: 0.9rem;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .debug-info {
+            margin-top: 20px;
+            font-size: 0.8rem;
+            color: #666;
+            text-align: left;
+            max-height: 100px;
+            overflow-y: auto;
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 8px;
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            .title {
+                font-size: 1.8rem;
+            }
+            
+            .microphone-btn {
+                width: 100px;
+                height: 100px;
+                font-size: 2.5rem;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1 class="title">🎤 ElevenLabs Voice Assistant</h1>
-        <p class="title" style="font-size: 1rem; margin-top: -10px;">Веб-версия с аудио в браузере</p>
-        
-        <div class="status ok" id="statusBadge">
-            ✅ Сервис работает | Время работы: <span id="uptime">calculating...</span>
+        <div class="header">
+            <h1 class="title">ElevenLabs Voice Assistant</h1>
+            <p class="subtitle">Разговаривайте с ИИ через прямой WebSocket</p>
+            <div class="status-badge disconnected" id="statusBadge">Отключено</div>
         </div>
         
-        <div class="mic-button" id="micButton">
-            🎤
-        </div>
+        <button class="microphone-btn" id="micButton">🎤</button>
         
-        <div class="volume-bar">
+        <div class="volume-meter">
             <div class="volume-level" id="volumeLevel"></div>
         </div>
         
-        <div style="text-align: center; margin: 10px 0; color: #666;" id="micStatus">
-            Нажмите на кнопку микрофона, чтобы начать разговор
+        <div class="controls">
+            <button class="btn primary" id="connectBtn">🔗 Подключиться</button>
+            <button class="btn" id="disconnectBtn" disabled>⛔ Отключиться</button>
+            <button class="btn" id="debugBtn">🔧 Отладка</button>
         </div>
         
-        <div class="chat-interface">
-            <div class="chat-messages" id="chatMessages">
-                <div class="message bot-message">
-                    Привет! Я голосовой ассистент ElevenLabs. Как я могу вам помочь?
+        <div class="conversation" id="conversation">
+            <div class="message system">
+                Нажмите "Подключиться", чтобы начать разговор с голосовым ассистентом
+            </div>
+        </div>
+        
+        <div class="settings">
+            <h3>⚙️ Настройки голоса и модели</h3>
+            <div class="setting-group">
+                <div class="setting-row">
+                    <span class="setting-label">Голос:</span>
+                    <select id="voiceSelect">
+                        <option value="21m00Tcm4TlvDq8ikWAM">Rachel (женский)</option>
+                        <option value="pNInz6obpgDQGcFmaJgB">Adam (мужской)</option>
+                        <option value="D38z5RcWu1voky8WS1ja">Domi (женский)</option>
+                        <option value="jsCqWAovK2LkecY7zXl4">Dave (мужской)</option>
+                        <option value="XB0fDUnXU5powFXDhCwa">Dorothy (женский)</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Модель:</span>
+                    <select id="modelSelect">
+                        <option value="eleven_turbo_v2">Eleven Turbo v2 (быстрая)</option>
+                        <option value="eleven_multilingual_v2">Multilingual v2 (многоязычная)</option>
+                    </select>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Stability:</span>
+                    <input type="range" id="stabilitySlider" min="0" max="1" step="0.1" value="0.5">
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Similarity:</span>
+                    <input type="range" id="similaritySlider" min="0" max="1" step="0.1" value="0.8">
                 </div>
             </div>
-            <div class="chat-input">
-                <input type="text" id="messageInput" placeholder="Или введите сообщение здесь...">
-                <button id="sendButton">Отправить</button>
-            </div>
         </div>
         
-        <div style="margin-top: 20px; text-align: center; color: #666; font-size: 0.8rem;">
-            <p>Используется WebSocket для связи с ElevenLabs API</p>
-            <p>ID агента: <span id="agentId">загрузка...</span></p>
-            <p>Состояние: <span id="connectionState">не подключен</span></p>
+        <div class="debug-info" id="debugInfo"></div>
+        
+        <div class="footer">
+            <p>Powered by ElevenLabs Conversational AI • <span id="apiKeyStatus">API Key: проверка...</span></p>
         </div>
     </div>
 
     <script>
-        // Основной класс для работы с голосовым ассистентом
-        class VoiceAssistant {
+        // Основной класс для работы с ElevenLabs Conversational AI
+        class ElevenLabsConversationalAI {
             constructor() {
                 // Инициализация переменных
                 this.ws = null;
-                this.isConnected = false;
-                this.isRecording = false;
-                this.isAgentSpeaking = false;
+                this.audioContext = null;
                 this.mediaRecorder = null;
                 this.audioStream = null;
-                this.agentId = null;
+                this.isConnected = false;
+                this.isRecording = false;
+                this.assistantState = 'idle';
+                this.audioChunks = [];
+                this.debugMode = false;
                 
-                // Инициализация элементов UI
-                this.micButton = document.getElementById('micButton');
-                this.micStatus = document.getElementById('micStatus');
-                this.volumeLevel = document.getElementById('volumeLevel');
-                this.chatMessages = document.getElementById('chatMessages');
-                this.messageInput = document.getElementById('messageInput');
-                this.sendButton = document.getElementById('sendButton');
-                this.connectionState = document.getElementById('connectionState');
-                this.agentId = document.getElementById('agentId');
-                this.statusBadge = document.getElementById('statusBadge');
-                this.uptime = document.getElementById('uptime');
+                // Инициализация UI элементов
+                this.initializeUI();
                 
-                // Загрузка информации о агенте
-                this.loadAgentInfo();
-                
-                // Подключаем обработчики событий
+                // Настройка обработчиков событий
                 this.setupEventListeners();
                 
-                // Обновляем статус каждые 5 секунд
-                setInterval(() => this.updateStatus(), 5000);
+                // Проверка API ключа
+                this.checkAPIKey();
+                
+                this.log('ElevenLabsConversationalAI initialized');
             }
             
-            // Загрузка информации о агенте
-            async loadAgentInfo() {
-                try {
-                    const response = await fetch('/api/config');
-                    if (response.ok) {
-                        const data = await response.json();
-                        this.agentId.textContent = data.agent_id || 'не найден';
-                    } else {
-                        this.agentId.textContent = 'ошибка загрузки';
-                    }
-                } catch (error) {
-                    console.error('Ошибка загрузки информации о агенте:', error);
-                    this.agentId.textContent = 'ошибка загрузки';
-                }
+            // Инициализация UI элементов
+            initializeUI() {
+                this.micButton = document.getElementById('micButton');
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.debugBtn = document.getElementById('debugBtn');
+                this.statusBadge = document.getElementById('statusBadge');
+                this.volumeLevel = document.getElementById('volumeLevel');
+                this.conversation = document.getElementById('conversation');
+                this.debugInfo = document.getElementById('debugInfo');
+                this.apiKeyStatus = document.getElementById('apiKeyStatus');
+                
+                // Настройки голоса
+                this.voiceSelect = document.getElementById('voiceSelect');
+                this.modelSelect = document.getElementById('modelSelect');
+                this.stabilitySlider = document.getElementById('stabilitySlider');
+                this.similaritySlider = document.getElementById('similaritySlider');
             }
             
             // Настройка обработчиков событий
             setupEventListeners() {
-                // Обработчик клика по кнопке микрофона
+                // Кнопка подключения
+                this.connectBtn.addEventListener('click', () => {
+                    this.connect();
+                });
+                
+                // Кнопка отключения
+                this.disconnectBtn.addEventListener('click', () => {
+                    this.disconnect();
+                });
+                
+                // Кнопка микрофона
                 this.micButton.addEventListener('click', () => {
-                    if (this.isRecording) {
-                        this.stopRecording();
+                    if (this.isConnected) {
+                        if (this.isRecording) {
+                            this.stopRecording();
+                        } else {
+                            this.startRecording();
+                        }
                     } else {
+                        this.showMessage('system', 'Сначала подключитесь к серверу');
+                    }
+                });
+                
+                // Кнопка отладки
+                this.debugBtn.addEventListener('click', () => {
+                    this.debugMode = !this.debugMode;
+                    this.debugInfo.style.display = this.debugMode ? 'block' : 'none';
+                    this.debugBtn.textContent = this.debugMode ? '🔧 Скрыть отладку' : '🔧 Отладка';
+                });
+                
+                // Обработчик нажатия клавиш (пробел для записи)
+                document.addEventListener('keydown', (e) => {
+                    if (e.code === 'Space' && this.isConnected && !this.isRecording && 
+                        this.assistantState !== 'speaking' && this.assistantState !== 'thinking') {
+                        e.preventDefault();
                         this.startRecording();
                     }
                 });
                 
-                // Обработчик клика по кнопке отправки сообщения
-                this.sendButton.addEventListener('click', () => {
-                    this.sendTextMessage();
-                });
-                
-                // Обработчик нажатия Enter в поле ввода
-                this.messageInput.addEventListener('keyup', (e) => {
-                    if (e.key === 'Enter') {
-                        this.sendTextMessage();
+                document.addEventListener('keyup', (e) => {
+                    if (e.code === 'Space' && this.isConnected && this.isRecording) {
+                        e.preventDefault();
+                        this.stopRecording();
                     }
                 });
             }
             
-            // Подключение к WebSocket
-            async connectWebSocket() {
+            // Проверка API ключа
+            async checkAPIKey() {
                 try {
-                    if (this.ws) {
-                        this.ws.close();
+                    const response = await fetch('/api/config');
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.api_key_configured) {
+                            this.apiKeyStatus.textContent = 'API Key: настроен';
+                            this.apiKeyStatus.style.color = '#2ecc71';
+                        } else {
+                            this.apiKeyStatus.textContent = 'API Key: не настроен';
+                            this.apiKeyStatus.style.color = '#e74c3c';
+                            this.showMessage('system', '⚠️ API Key не настроен. Обратитесь к администратору.');
+                        }
                     }
+                } catch (error) {
+                    this.log('Error checking API key:', error);
+                    this.apiKeyStatus.textContent = 'API Key: ошибка проверки';
+                    this.apiKeyStatus.style.color = '#e74c3c';
+                }
+            }
+            
+            // Подключение к серверу
+            async connect() {
+                if (this.isConnected) return;
+                
+                try {
+                    this.updateStatus('connecting', 'Подключение...');
+                    this.log('Connecting to server...');
                     
-                    this.connectionState.textContent = 'подключение...';
-                    
-                    // Подключаемся к нашему WebSocket серверу
+                    // Инициализация WebSocket
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
+                    const wsUrl = `${protocol}//${window.location.host}/ws/voice`;
                     
                     this.ws = new WebSocket(wsUrl);
                     
-                    this.ws.onopen = () => {
-                        this.isConnected = true;
-                        this.connectionState.textContent = 'подключено';
-                        this.addSystemMessage('Соединение установлено');
-                        console.log('WebSocket подключен');
-                    };
-                    
-                    this.ws.onmessage = (event) => {
-                        this.handleWebSocketMessage(event);
-                    };
-                    
-                    this.ws.onclose = () => {
-                        this.isConnected = false;
-                        this.connectionState.textContent = 'отключено';
-                        this.addSystemMessage('Соединение закрыто');
-                        console.log('WebSocket отключен');
-                    };
-                    
-                    this.ws.onerror = (error) => {
-                        this.connectionState.textContent = 'ошибка';
-                        this.addSystemMessage('Ошибка соединения');
-                        console.error('WebSocket ошибка:', error);
-                    };
+                    this.ws.onopen = this.handleWebSocketOpen.bind(this);
+                    this.ws.onmessage = this.handleWebSocketMessage.bind(this);
+                    this.ws.onclose = this.handleWebSocketClose.bind(this);
+                    this.ws.onerror = this.handleWebSocketError.bind(this);
                     
                 } catch (error) {
-                    console.error('Ошибка подключения к WebSocket:', error);
-                    this.addSystemMessage('Ошибка подключения: ' + error.message);
+                    this.log('Connection error:', error);
+                    this.updateStatus('disconnected', 'Ошибка подключения');
+                    this.showMessage('system', `❌ Ошибка подключения: ${error.message}`);
                 }
             }
             
-            // Обработка сообщений от сервера
+            // Обработка открытия WebSocket
+            handleWebSocketOpen() {
+                this.log('WebSocket connected');
+                this.isConnected = true;
+                this.updateStatus('connected', 'Подключено');
+                this.showMessage('system', '✅ Подключено к серверу');
+                
+                // Отправляем конфигурацию
+                this.sendVoiceConfiguration();
+                
+                // Обновляем состояние кнопок
+                this.connectBtn.disabled = true;
+                this.disconnectBtn.disabled = false;
+            }
+            
+            // Отправка конфигурации голоса
+            sendVoiceConfiguration() {
+                if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+                
+                const config = {
+                    type: 'configuration',
+                    voice_id: this.voiceSelect.value,
+                    model_id: this.modelSelect.value,
+                    enable_maas: true,
+                    voice_settings: {
+                        stability: parseFloat(this.stabilitySlider.value),
+                        similarity_boost: parseFloat(this.similaritySlider.value)
+                    }
+                };
+                
+                this.ws.send(JSON.stringify(config));
+                this.log('Sent voice configuration:', config);
+                
+                this.showMessage('system', '🎵 Конфигурация голоса отправлена');
+            }
+            
+            // Обработка сообщений от WebSocket
             handleWebSocketMessage(event) {
                 try {
                     const data = JSON.parse(event.data);
-                    console.log('Получено сообщение:', data);
+                    this.log('Received message:', data);
                     
-                    switch (data.type) {
-                        case 'user_transcript':
-                            const transcript = data.user_transcription_event?.user_transcript;
-                            if (transcript) {
-                                this.addUserMessage(transcript);
-                            }
-                            break;
-                            
-                        case 'agent_response':
-                            const response = data.agent_response_event?.agent_response;
-                            if (response) {
-                                this.addAssistantMessage(response);
-                                this.isAgentSpeaking = true;
-                                this.micStatus.textContent = 'Ассистент говорит...';
-                            }
-                            break;
-                            
-                        case 'audio':
-                            const audioData = data.audio_event?.audio_base_64 || data.audio_data;
-                            if (audioData) {
-                                this.playAudio(audioData);
-                            }
-                            break;
-                            
-                        case 'conversation_initiation_metadata':
-                            const metadata = data.conversation_initiation_metadata_event;
-                            if (metadata) {
-                                console.log('Инициализация разговора:', metadata);
-                                this.addSystemMessage('Разговор начат');
-                            }
-                            break;
-                            
-                        case 'vad_score':
-                            const vadScore = data.vad_score_event?.vad_score;
-                            if (typeof vadScore === 'number') {
-                                this.updateVolumeLevel(vadScore);
-                            }
-                            break;
-                            
-                        case 'interruption':
-                            this.isAgentSpeaking = false;
-                            this.addSystemMessage('Прерывание обнаружено');
-                            break;
-                            
-                        case 'error':
-                            this.addSystemMessage('Ошибка: ' + (data.message || 'Неизвестная ошибка'));
-                            break;
+                    // Обработка состояния
+                    if (data.state) {
+                        this.handleStateChange(data.state);
+                    }
+                    
+                    // Обработка распознанного текста
+                    if (data.input_text) {
+                        this.showMessage('user', data.input_text);
+                    }
+                    
+                    // Обработка ответа ассистента
+                    if (data.text) {
+                        this.showMessage('assistant', data.text);
+                    }
+                    
+                    // Обработка аудио
+                    if (data.audio) {
+                        this.playAudio(data.audio);
+                    }
+                    
+                    // Обработка ошибок
+                    if (data.error) {
+                        this.showMessage('system', `❌ Ошибка: ${data.error}`);
                     }
                     
                 } catch (error) {
-                    console.error('Ошибка обработки сообщения:', error);
+                    this.log('Error parsing message:', error);
                 }
+            }
+            
+            // Обработка изменения состояния ассистента
+            handleStateChange(state) {
+                this.assistantState = state;
+                
+                switch (state) {
+                    case 'listening':
+                        this.updateStatus('listening', '🎧 Слушаю...');
+                        this.micButton.classList.remove('speaking', 'thinking');
+                        this.micButton.classList.add('listening');
+                        break;
+                        
+                    case 'thinking':
+                        this.updateStatus('thinking', '🤔 Думаю...');
+                        this.micButton.classList.remove('listening', 'speaking');
+                        this.micButton.classList.add('thinking');
+                        break;
+                        
+                    case 'speaking':
+                        this.updateStatus('speaking', '🗣️ Говорю...');
+                        this.micButton.classList.remove('listening', 'thinking');
+                        this.micButton.classList.add('speaking');
+                        break;
+                        
+                    default:
+                        this.updateStatus('connected', 'Подключено');
+                        this.micButton.classList.remove('listening', 'thinking', 'speaking');
+                }
+            }
+            
+            // Обработка закрытия WebSocket
+            handleWebSocketClose(event) {
+                this.log(`WebSocket closed: ${event.code} ${event.reason}`);
+                
+                this.isConnected = false;
+                this.updateStatus('disconnected', 'Отключено');
+                
+                if (this.isRecording) {
+                    this.stopRecording();
+                }
+                
+                // Обновляем состояние кнопок
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
+                
+                // Показываем сообщение
+                if (event.code !== 1000) {
+                    this.showMessage('system', `❌ Соединение закрыто: ${event.reason || 'Неизвестная причина'}`);
+                } else {
+                    this.showMessage('system', 'Соединение закрыто');
+                }
+            }
+            
+            // Обработка ошибок WebSocket
+            handleWebSocketError(error) {
+                this.log('WebSocket error:', error);
+                this.showMessage('system', 'Ошибка соединения с сервером');
+            }
+            
+            // Отключение от сервера
+            disconnect() {
+                if (!this.isConnected) return;
+                
+                this.log('Disconnecting...');
+                
+                // Останавливаем запись если она идет
+                if (this.isRecording) {
+                    this.stopRecording();
+                }
+                
+                // Закрываем WebSocket
+                if (this.ws) {
+                    this.ws.close(1000, 'Нормальное закрытие');
+                }
+                
+                this.isConnected = false;
+                this.updateStatus('disconnected', 'Отключено');
+                
+                // Обновляем состояние кнопок
+                this.connectBtn.disabled = false;
+                this.disconnectBtn.disabled = true;
             }
             
             // Начало записи аудио
             async startRecording() {
-                if (this.isRecording) return;
+                if (!this.isConnected || this.isRecording || 
+                    this.assistantState === 'speaking' || this.assistantState === 'thinking') return;
                 
                 try {
+                    this.log('Starting recording...');
+                    
                     // Запрашиваем доступ к микрофону
-                    this.audioStream = await navigator.mediaDevices.getUserMedia({ 
+                    this.audioStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             echoCancellation: true,
                             noiseSuppression: true,
-                            autoGainControl: true
-                        } 
+                            autoGainControl: true,
+                            sampleRate: 16000
+                        }
                     });
                     
-                    // Если не подключены к WebSocket, подключаемся
-                    if (!this.isConnected) {
-                        await this.connectWebSocket();
-                    }
+                    // Создаем AudioContext для анализа громкости
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 16000
+                    });
                     
-                    // Настройка MediaRecorder
+                    // Настраиваем анализатор громкости
+                    this.setupVolumeAnalyzer();
+                    
+                    // Создаем MediaRecorder
                     this.mediaRecorder = new MediaRecorder(this.audioStream);
+                    this.audioChunks = [];
                     
                     this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN && !this.isAgentSpeaking) {
-                            this.sendAudioChunk(event.data);
+                        if (event.data.size > 0) {
+                            this.audioChunks.push(event.data);
+                            this.processAudioChunk(event.data);
                         }
                     };
                     
                     this.mediaRecorder.start(250); // Запись по 250мс
                     this.isRecording = true;
-                    this.micButton.classList.add('recording');
-                    this.micStatus.textContent = 'Запись... Говорите';
                     
-                    // Анализ громкости
-                    this.setupVolumeAnalysis();
+                    // Обновляем UI
+                    this.micButton.classList.add('listening');
+                    this.updateStatus('listening', '🎧 Говорите...');
                     
                 } catch (error) {
-                    console.error('Ошибка начала записи:', error);
-                    this.addSystemMessage('Ошибка доступа к микрофону: ' + error.message);
+                    this.log('Recording error:', error);
+                    this.showMessage('system', `❌ Ошибка записи: ${error.message}`);
                 }
             }
             
-            // Настройка анализа громкости
-            setupVolumeAnalysis() {
-                try {
-                    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    const analyzer = audioContext.createAnalyser();
-                    const microphone = audioContext.createMediaStreamSource(this.audioStream);
-                    const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
+            // Настройка анализатора громкости
+            setupVolumeAnalyzer() {
+                if (!this.audioContext || !this.audioStream) return;
+                
+                const source = this.audioContext.createMediaStreamSource(this.audioStream);
+                const analyzer = this.audioContext.createAnalyser();
+                
+                analyzer.fftSize = 256;
+                analyzer.smoothingTimeConstant = 0.8;
+                
+                source.connect(analyzer);
+                
+                const bufferLength = analyzer.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                
+                const updateVolume = () => {
+                    if (!this.isRecording) return;
                     
-                    analyzer.smoothingTimeConstant = 0.8;
-                    analyzer.fftSize = 1024;
+                    analyzer.getByteFrequencyData(dataArray);
                     
-                    microphone.connect(analyzer);
-                    analyzer.connect(javascriptNode);
-                    javascriptNode.connect(audioContext.destination);
-                    
-                    javascriptNode.onaudioprocess = () => {
-                        const array = new Uint8Array(analyzer.frequencyBinCount);
-                        analyzer.getByteFrequencyData(array);
-                        
-                        let values = 0;
-                        for (let i = 0; i < array.length; i++) {
-                            values += array[i];
-                        }
-                        
-                        const average = values / array.length;
-                        const volume = Math.min(100, Math.max(0, average * 1.5));
-                        
-                        this.updateVolumeLevel(volume / 100);
-                    };
-                    
-                    // Сохраняем ссылки для очистки
-                    this.audioContext = audioContext;
-                    this.javascriptNode = javascriptNode;
-                    this.analyzer = analyzer;
-                    this.microphone = microphone;
-                    
-                } catch (error) {
-                    console.error('Ошибка анализа громкости:', error);
-                }
-            }
-            
-            // Обновление индикатора громкости
-            updateVolumeLevel(level) {
-                if (this.volumeLevel) {
-                    this.volumeLevel.style.width = `${level * 100}%`;
-                    
-                    // Изменение цвета в зависимости от громкости
-                    if (level > 0.7) {
-                        this.volumeLevel.style.background = 'linear-gradient(90deg, #4CAF50, #8BC34A)';
-                    } else if (level > 0.4) {
-                        this.volumeLevel.style.background = 'linear-gradient(90deg, #03A9F4, #2196F3)';
-                    } else {
-                        this.volumeLevel.style.background = 'linear-gradient(90deg, #667eea, #764ba2)';
+                    // Вычисляем средний уровень громкости
+                    let sum = 0;
+                    for (let i = 0; i < bufferLength; i++) {
+                        sum += dataArray[i];
                     }
-                }
+                    
+                    const average = sum / bufferLength;
+                    const volume = Math.min(100, Math.max(0, average * 1.5));
+                    
+                    // Обновляем индикатор громкости
+                    this.volumeLevel.style.width = `${volume}%`;
+                    
+                    // Изменяем цвет в зависимости от громкости
+                    if (volume > 70) {
+                        this.volumeLevel.style.background = 'linear-gradient(to right, #ff4757, #ff6b81)';
+                    } else if (volume > 30) {
+                        this.volumeLevel.style.background = 'linear-gradient(to right, #1e90ff, #70a1ff)';
+                    } else {
+                        this.volumeLevel.style.background = 'linear-gradient(to right, #667eea, #764ba2)';
+                    }
+                    
+                    requestAnimationFrame(updateVolume);
+                };
+                
+                updateVolume();
+                
+                // Сохраняем ссылки
+                this.audioSource = source;
+                this.audioAnalyzer = analyzer;
             }
             
-            // Отправка аудио чанка
-            async sendAudioChunk(blob) {
+            // Обработка аудио чанка
+            async processAudioChunk(chunk) {
                 if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
                 
                 try {
-                    const buffer = await blob.arrayBuffer();
-                    const base64Audio = this.arrayBufferToBase64(buffer);
+                    // Конвертируем blob в arrayBuffer
+                    const arrayBuffer = await chunk.arrayBuffer();
                     
+                    // Конвертируем в base64
+                    const base64Audio = this.arrayBufferToBase64(arrayBuffer);
+                    
+                    // Отправляем на сервер
                     this.ws.send(JSON.stringify({
-                        type: 'user_audio_chunk',
-                        user_audio_chunk: base64Audio
+                        audio: base64Audio
                     }));
                     
                 } catch (error) {
-                    console.error('Ошибка отправки аудио:', error);
+                    this.log('Error processing audio chunk:', error);
                 }
             }
             
@@ -604,106 +933,78 @@ async def get_homepage():
             stopRecording() {
                 if (!this.isRecording) return;
                 
-                try {
-                    if (this.mediaRecorder) {
-                        this.mediaRecorder.stop();
-                    }
-                    
-                    if (this.audioStream) {
-                        this.audioStream.getTracks().forEach(track => track.stop());
-                    }
-                    
-                    // Очистка аудио анализа
-                    if (this.javascriptNode) {
-                        this.javascriptNode.disconnect();
-                    }
-                    
-                    if (this.microphone) {
-                        this.microphone.disconnect();
-                    }
-                    
-                    if (this.analyzer) {
-                        this.analyzer.disconnect();
-                    }
-                    
-                    if (this.audioContext) {
-                        this.audioContext.close();
-                    }
-                    
-                    this.isRecording = false;
-                    this.micButton.classList.remove('recording');
-                    this.micStatus.textContent = 'Запись остановлена';
-                    this.volumeLevel.style.width = '0%';
-                    
-                } catch (error) {
-                    console.error('Ошибка остановки записи:', error);
-                }
-            }
-            
-            // Отправка текстового сообщения
-            sendTextMessage() {
-                const message = this.messageInput.value.trim();
-                if (!message) return;
+                this.log('Stopping recording...');
                 
-                // Если не подключены к WebSocket, подключаемся
-                if (!this.isConnected) {
-                    this.connectWebSocket();
+                // Останавливаем MediaRecorder
+                if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                    this.mediaRecorder.stop();
                 }
                 
+                // Останавливаем аудио поток
+                if (this.audioStream) {
+                    this.audioStream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Очищаем AudioContext
+                if (this.audioContext) {
+                    if (this.audioSource) {
+                        this.audioSource.disconnect();
+                    }
+                    
+                    this.audioContext.close();
+                }
+                
+                this.isRecording = false;
+                
+                // Обновляем UI
+                this.micButton.classList.remove('listening');
+                this.volumeLevel.style.width = '0%';
+                
+                // Отправляем пустое сообщение, чтобы сигнализировать конец речи
                 if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({
-                        type: 'text_message',
-                        text: message
-                    }));
-                    
-                    this.addUserMessage(message);
-                    this.messageInput.value = '';
-                } else {
-                    this.addSystemMessage('Не удалось отправить сообщение: нет подключения');
+                    this.ws.send(JSON.stringify({}));
+                    this.log('Sent end-of-speech signal');
                 }
+                
+                this.updateStatus('connected', 'Обработка...');
             }
             
-            // Воспроизведение аудио от ассистента
+            // Воспроизведение аудио
             playAudio(base64Audio) {
                 try {
-                    // Для воспроизведения PCM аудио от ElevenLabs
-                    const audioData = this.base64ToArrayBuffer(base64Audio);
+                    // Декодируем base64
+                    const binaryString = atob(base64Audio);
+                    const bytes = new Uint8Array(binaryString.length);
                     
-                    // Создаем WAV из PCM
-                    const wavData = this.createWavFromPcm(audioData, 16000, 1);
-                    const blob = new Blob([wavData], { type: 'audio/wav' });
-                    const url = URL.createObjectURL(blob);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
                     
-                    const audio = new Audio(url);
+                    // Создаем AudioContext если нужно
+                    if (!this.playbackContext) {
+                        this.playbackContext = new (window.AudioContext || window.webkitAudioContext)();
+                    }
                     
-                    audio.onended = () => {
-                        URL.revokeObjectURL(url);
-                        
-                        // Если это был последний аудио чанк
-                        if (!this.isMoreAudioExpected) {
-                            this.isAgentSpeaking = false;
-                            this.micStatus.textContent = 'Ассистент закончил говорить';
-                        }
-                    };
+                    // Преобразуем PCM в WAV
+                    const wavData = this.createWavFromPcm(bytes, 16000, 1);
                     
-                    audio.onerror = (error) => {
-                        console.error('Ошибка воспроизведения аудио:', error);
-                        URL.revokeObjectURL(url);
-                    };
-                    
-                    audio.play().catch(error => {
-                        console.error('Ошибка воспроизведения аудио:', error);
+                    // Декодируем и воспроизводим
+                    this.playbackContext.decodeAudioData(wavData, (buffer) => {
+                        const source = this.playbackContext.createBufferSource();
+                        source.buffer = buffer;
+                        source.connect(this.playbackContext.destination);
+                        source.start(0);
                     });
                     
                 } catch (error) {
-                    console.error('Ошибка обработки аудио:', error);
+                    this.log('Error playing audio:', error);
                 }
             }
             
-            // Создание WAV из PCM данных
+            // Создание WAV из PCM
             createWavFromPcm(pcmData, sampleRate, numChannels) {
-                const bitDepth = 16;
-                const bytesPerSample = bitDepth / 8;
+                const bitsPerSample = 16;
+                const bytesPerSample = bitsPerSample / 8;
                 const blockAlign = numChannels * bytesPerSample;
                 const byteRate = sampleRate * blockAlign;
                 const dataSize = pcmData.length;
@@ -724,13 +1025,13 @@ async def get_homepage():
                 view.setUint32(24, sampleRate, true);
                 view.setUint32(28, byteRate, true);
                 view.setUint16(32, blockAlign, true);
-                view.setUint16(34, bitDepth, true);
+                view.setUint16(34, bitsPerSample, true);
                 
                 // data sub-chunk
                 this.writeString(view, 36, 'data');
                 view.setUint32(40, dataSize, true);
                 
-                // Запись PCM данных
+                // Write PCM data
                 for (let i = 0; i < dataSize; i++) {
                     view.setUint8(44 + i, pcmData[i]);
                 }
@@ -745,119 +1046,65 @@ async def get_homepage():
                 }
             }
             
-            // Конвертация из base64 в ArrayBuffer
-            base64ToArrayBuffer(base64) {
-                const binaryString = atob(base64);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                return bytes;
-            }
-            
-            // Конвертация из ArrayBuffer в base64
+            // Конвертация ArrayBuffer в base64
             arrayBufferToBase64(buffer) {
                 const bytes = new Uint8Array(buffer);
                 let binary = '';
+                
                 for (let i = 0; i < bytes.byteLength; i++) {
                     binary += String.fromCharCode(bytes[i]);
                 }
+                
                 return btoa(binary);
             }
             
-            // Добавление сообщения пользователя в чат
-            addUserMessage(text) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message user-message';
-                messageDiv.textContent = text;
-                this.chatMessages.appendChild(messageDiv);
-                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            // Обновление статуса
+            updateStatus(state, text) {
+                this.statusBadge.className = `status-badge ${state}`;
+                this.statusBadge.textContent = text;
             }
             
-            // Добавление сообщения ассистента в чат
-            addAssistantMessage(text) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message bot-message';
-                messageDiv.textContent = text;
-                this.chatMessages.appendChild(messageDiv);
-                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+            // Показать сообщение в чате
+            showMessage(type, text) {
+                const messageEl = document.createElement('div');
+                messageEl.className = `message ${type}`;
+                messageEl.textContent = text;
+                
+                this.conversation.appendChild(messageEl);
+                this.conversation.scrollTop = this.conversation.scrollHeight;
             }
             
-            // Добавление системного сообщения в чат
-            addSystemMessage(text) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message';
-                messageDiv.style.backgroundColor = '#fff3cd';
-                messageDiv.style.color = '#856404';
-                messageDiv.style.textAlign = 'center';
-                messageDiv.style.margin = '10px auto';
-                messageDiv.style.fontStyle = 'italic';
-                messageDiv.textContent = text;
-                this.chatMessages.appendChild(messageDiv);
-                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
-            }
-            
-            // Обновление статуса и времени работы
-            async updateStatus() {
-                try {
-                    const response = await fetch('/api/stats');
-                    if (response.ok) {
-                        const data = await response.json();
-                        
-                        // Обновляем время работы
-                        const uptime = Math.floor(data.uptime);
-                        const hours = Math.floor(uptime / 3600);
-                        const minutes = Math.floor((uptime % 3600) / 60);
-                        const seconds = uptime % 60;
-                        this.uptime.textContent = `${hours}ч ${minutes}м ${seconds}с`;
-                        
-                        // Обновляем класс статуса
-                        if (data.initialized) {
-                            this.statusBadge.className = 'status ok';
-                        } else {
-                            this.statusBadge.className = 'status error';
-                        }
+            // Логирование
+            log(...args) {
+                console.log('[ElevenLabsAI]', ...args);
+                
+                if (this.debugMode) {
+                    const message = args.map(arg => 
+                        typeof arg === 'object' ? JSON.stringify(arg) : arg
+                    ).join(' ');
+                    
+                    const logEntry = document.createElement('div');
+                    logEntry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+                    
+                    this.debugInfo.appendChild(logEntry);
+                    this.debugInfo.scrollTop = this.debugInfo.scrollHeight;
+                    
+                    // Ограничиваем количество записей
+                    if (this.debugInfo.children.length > 50) {
+                        this.debugInfo.removeChild(this.debugInfo.children[0]);
                     }
-                } catch (error) {
-                    console.error('Ошибка обновления статуса:', error);
                 }
             }
         }
-        
+
         // Инициализация при загрузке страницы
         document.addEventListener('DOMContentLoaded', () => {
-            window.voiceAssistant = new VoiceAssistant();
+            window.elevenlabsAI = new ElevenLabsConversationalAI();
         });
-        
-        // Обновление времени работы каждые 5 секунд
-        setInterval(() => {
-            fetch('/api/stats')
-                .then(response => response.json())
-                .then(data => {
-                    const uptime = Math.floor(data.uptime);
-                    const hours = Math.floor(uptime / 3600);
-                    const minutes = Math.floor((uptime % 3600) / 60);
-                    const seconds = uptime % 60;
-                    document.getElementById('uptime').textContent = 
-                        `${hours}ч ${minutes}м ${seconds}с`;
-                })
-                .catch(() => {
-                    document.getElementById('uptime').textContent = 'недоступно';
-                });
-        }, 5000);
     </script>
 </body>
 </html>
-        """)
-
-@app.get("/debug", response_class=HTMLResponse)
-async def get_debug():
-    """Страница отладки"""
-    try:
-        with open(Path(__file__).parent / "debug.html") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        return HTMLResponse(content="<h1>Debug page not found</h1>")
+    """)
 
 @app.get("/health")
 async def health_check():
@@ -868,7 +1115,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "ElevenLabs Voice Assistant",
-        "version": "3.0-render-audio",
+        "version": "3.0-render-direct",
         "timestamp": time.time(),
         "uptime": time.time() - app_state.start_time,
         "config": {
@@ -885,6 +1132,7 @@ async def get_config():
     
     return {
         "agent_id": app_state.config.ELEVENLABS_AGENT_ID,
+        "api_key_configured": bool(app_state.config.ELEVENLABS_API_KEY),
         "audio_format": "PCM 16kHz",
         "features": {
             "websocket_api": True,
@@ -913,129 +1161,106 @@ async def get_stats():
     
     return stats
 
-@app.get("/api/signed-url")
-async def get_signed_url():
-    """Получение signed URL для WebSocket"""
-    if not app_state.is_initialized:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    
-    try:
-        # URL для получения signed URL
-        url = f"https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id={app_state.config.ELEVENLABS_AGENT_ID}"
-        
-        headers = {
-            "xi-api-key": app_state.config.ELEVENLABS_API_KEY,
-            "Content-Type": "application/json"
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return {
-                        "signed_url": data["signed_url"],
-                        "agent_id": app_state.config.ELEVENLABS_AGENT_ID
-                    }
-                else:
-                    error_text = await response.text()
-                    logger.error(f"Ошибка получения signed URL: {response.status} - {error_text}")
-                    return {
-                        "error": f"Ошибка получения signed URL: {response.status}",
-                        "fallback_url": f"wss://api.elevenlabs.io/v1/convai/conversation?agent_id={app_state.config.ELEVENLABS_AGENT_ID}",
-                        "agent_id": app_state.config.ELEVENLABS_AGENT_ID
-                    }
-    except Exception as e:
-        logger.error(f"Исключение при получении signed URL: {e}")
-        return {
-            "error": f"Ошибка: {str(e)}",
-            "fallback_url": f"wss://api.elevenlabs.io/v1/convai/conversation?agent_id={app_state.config.ELEVENLABS_AGENT_ID}",
-            "agent_id": app_state.config.ELEVENLABS_AGENT_ID
-        }
-
 # ===== WebSocket Endpoints =====
 
-@app.websocket("/ws/conversation")
-async def websocket_conversation(websocket: WebSocket):
-    """WebSocket для разговора с ElevenLabs"""
+@app.websocket("/ws/voice")
+async def websocket_voice(websocket: WebSocket):
+    """WebSocket для голосового интерфейса по прямому протоколу"""
     await websocket.accept()
     
     # Добавляем соединение в список активных
     app_state.active_connections.append(websocket)
     app_state.stats["connections"] += 1
-    app_state.stats["ws_connections"] += 1
     
     # Уникальный ID для этого соединения
-    connection_id = f"conn_{time.time()}_{id(websocket)}"
+    connection_id = f"voice_{time.time()}_{id(websocket)}"
     elevenlabs_ws = None
     
     try:
-        logger.info(f"🔗 Новое WebSocket подключение: {connection_id}")
+        logger.info(f"🎤 Новое голосовое WebSocket подключение: {connection_id}")
         
-        # Отправляем статус подключения
-        await websocket.send_json({
-            "type": "status",
-            "state": "connecting",
-            "message": "Подключение к ElevenLabs..."
-        })
-        
-        # Подключаемся к ElevenLabs
+        # Ждем инициализационное сообщение от клиента
         try:
-            # Сначала пытаемся получить signed URL
-            signed_url_response = await get_signed_url()
+            init_message = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+            config = json.loads(init_message)
             
-            if "signed_url" in signed_url_response:
-                ws_url = signed_url_response["signed_url"]
-                logger.info(f"🔐 Используем signed URL для {connection_id}")
-            else:
-                ws_url = signed_url_response.get("fallback_url", f"wss://api.elevenlabs.io/v1/convai/conversation?agent_id={app_state.config.ELEVENLABS_AGENT_ID}")
-                logger.warning(f"⚠️ Используем fallback URL для {connection_id}")
+            logger.info(f"📝 Получено сообщение инициализации: {config}")
             
-            # Заголовки для WebSocket подключения
-            headers = {}
-            if "token=" not in ws_url:
-                headers["xi-api-key"] = app_state.config.ELEVENLABS_API_KEY
-            
-            # Подключаемся к ElevenLabs WebSocket
-            async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(ws_url, headers=headers) as elevenlabs_ws:
-                    app_state.elevenlabs_connections[connection_id] = elevenlabs_ws
+            # Устанавливаем соединение с ElevenLabs Conversational API
+            try:
+                # URL для соединения с ElevenLabs
+                ws_url = "wss://api.elevenlabs.io/v1/conversational"
+                
+                # Создаем сессию
+                async with aiohttp.ClientSession() as session:
+                    # Заменяем API ключ из конфигурации клиента на серверный
+                    if "xi_api_key" in config:
+                        config["xi_api_key"] = app_state.config.ELEVENLABS_API_KEY
+                    elif "type" in config and config["type"] == "configuration":
+                        # Формируем правильную конфигурацию
+                        config = {
+                            "xi_api_key": app_state.config.ELEVENLABS_API_KEY,
+                            "voice_id": config.get("voice_id", "21m00Tcm4TlvDq8ikWAM"),
+                            "model_id": config.get("model_id", "eleven_turbo_v2"),
+                            "enable_maas": True,
+                            "voice_settings": config.get("voice_settings", {
+                                "stability": 0.5,
+                                "similarity_boost": 0.8
+                            })
+                        }
                     
-                    # Отправляем инициализацию
-                    await elevenlabs_ws.send_json({
-                        "type": "conversation_initiation_client_data"
-                    })
+                    logger.info(f"🔄 Подключение к ElevenLabs Conversational API...")
                     
-                    # Создаем две задачи для двунаправленной передачи
-                    client_to_elevenlabs = asyncio.create_task(
-                        forward_messages(websocket, elevenlabs_ws, connection_id, "client_to_elevenlabs")
-                    )
-                    
-                    elevenlabs_to_client = asyncio.create_task(
-                        forward_messages(elevenlabs_ws, websocket, connection_id, "elevenlabs_to_client")
-                    )
-                    
-                    # Ждем завершения любой из задач
-                    done, pending = await asyncio.wait(
-                        [client_to_elevenlabs, elevenlabs_to_client],
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-                    
-                    # Отменяем оставшиеся задачи
-                    for task in pending:
-                        task.cancel()
-                    
-                    # Проверяем на ошибки
-                    for task in done:
-                        try:
-                            task.result()
-                        except Exception as e:
-                            logger.error(f"❌ Ошибка в задаче пересылки: {e}")
-        
-        except Exception as e:
-            logger.error(f"❌ Ошибка подключения к ElevenLabs: {e}")
+                    # Подключаемся к ElevenLabs
+                    async with session.ws_connect(ws_url) as elevenlabs_ws:
+                        app_state.elevenlabs_connections[connection_id] = elevenlabs_ws
+                        
+                        # Отправляем инициализационное сообщение
+                        await elevenlabs_ws.send_str(json.dumps(config))
+                        logger.info(f"📤 Инициализационное сообщение отправлено")
+                        
+                        # Создаем две задачи для пересылки сообщений
+                        client_to_elevenlabs = asyncio.create_task(
+                            forward_websocket_messages(websocket, elevenlabs_ws, connection_id, "client_to_elevenlabs")
+                        )
+                        
+                        elevenlabs_to_client = asyncio.create_task(
+                            forward_websocket_messages(elevenlabs_ws, websocket, connection_id, "elevenlabs_to_client")
+                        )
+                        
+                        # Ждем завершения любой из задач
+                        done, pending = await asyncio.wait(
+                            [client_to_elevenlabs, elevenlabs_to_client],
+                            return_when=asyncio.FIRST_COMPLETED
+                        )
+                        
+                        # Отменяем оставшиеся задачи
+                        for task in pending:
+                            task.cancel()
+                        
+                        # Проверяем на ошибки
+                        for task in done:
+                            try:
+                                task.result()
+                            except Exception as e:
+                                logger.error(f"❌ Ошибка в задаче пересылки: {e}")
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка подключения к ElevenLabs: {e}")
+                await websocket.send_json({
+                    "error": f"Ошибка подключения к ElevenLabs: {str(e)}"
+                })
+                
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ Таймаут ожидания инициализации от клиента: {connection_id}")
             await websocket.send_json({
-                "type": "error",
-                "message": f"Ошибка подключения к ElevenLabs: {str(e)}"
+                "error": "Таймаут ожидания инициализации"
+            })
+            
+        except json.JSONDecodeError:
+            logger.error(f"❌ Ошибка декодирования JSON: {connection_id}")
+            await websocket.send_json({
+                "error": "Неверный формат инициализационного сообщения"
             })
     
     except WebSocketDisconnect:
@@ -1045,8 +1270,7 @@ async def websocket_conversation(websocket: WebSocket):
         logger.error(f"❌ Ошибка WebSocket: {e}")
         try:
             await websocket.send_json({
-                "type": "error",
-                "message": f"Ошибка сервера: {str(e)}"
+                "error": f"Ошибка сервера: {str(e)}"
             })
         except:
             pass
@@ -1054,87 +1278,115 @@ async def websocket_conversation(websocket: WebSocket):
     finally:
         # Закрываем соединение с ElevenLabs
         if connection_id in app_state.elevenlabs_connections:
-            elevenlabs_ws = app_state.elevenlabs_connections[connection_id]
+            elevenlabs_ws = app_state.elevenlabs_connections.pop(connection_id, None)
             if elevenlabs_ws and not elevenlabs_ws.closed:
                 await elevenlabs_ws.close()
-            del app_state.elevenlabs_connections[connection_id]
         
         # Удаляем из списка активных соединений
         if websocket in app_state.active_connections:
             app_state.active_connections.remove(websocket)
         
-        logger.info(f"🧹 WebSocket соединение закрыто: {connection_id}")
+        logger.info(f"🧹 Голосовое WebSocket соединение закрыто: {connection_id}")
 
-async def forward_messages(source_ws, target_ws, connection_id, direction):
+async def forward_websocket_messages(source, target, connection_id, direction):
     """Пересылка сообщений между WebSocket соединениями"""
     try:
-        async for message in source_ws:
-            try:
+        if direction == "client_to_elevenlabs":
+            # От клиента к ElevenLabs
+            async for message in source:
                 if isinstance(message, str):
                     # Текстовое сообщение
-                    data = json.loads(message)
-                    
-                    # Преобразование формата сообщений если нужно
-                    if direction == "client_to_elevenlabs":
-                        # От клиента к ElevenLabs
-                        if "type" in data and data["type"] == "text_message":
-                            # Преобразуем текстовое сообщение в transcription
-                            data = {
-                                "text": data["text"]
-                            }
+                    try:
+                        data = json.loads(message)
+                        await target.send_str(json.dumps(data))
+                        app_state.stats["messages_received"] += 1
                         
-                        elif "user_audio_chunk" in data:
-                            # Аудио чанк от клиента
+                        # Если это аудио
+                        if "audio" in data:
                             app_state.stats["audio_chunks_sent"] += 1
-                        
-                        # Отправляем сообщение в ElevenLabs
-                        await target_ws.send_json(data)
-                    
-                    else:
-                        # От ElevenLabs к клиенту
-                        if "audio_event" in data and "audio_base_64" in data["audio_event"]:
-                            app_state.stats["audio_chunks_received"] += 1
-                        
-                        # Отправляем сообщение клиенту
-                        await target_ws.send_str(message)
-                
-                elif isinstance(message, bytes):
-                    # Бинарное сообщение (для будущих версий)
-                    await target_ws.send_bytes(message)
-                
-                else:
-                    # Другие типы сообщений (WebSocketMessage)
-                    if message.type == aiohttp.WSMsgType.TEXT:
-                        data = json.loads(message.data)
-                        
-                        if direction == "elevenlabs_to_client":
-                            # Отправляем сообщение клиенту
-                            await target_ws.send_json(data)
                             
-                            if "audio_event" in data and "audio_base_64" in data["audio_event"]:
-                                app_state.stats["audio_chunks_received"] += 1
+                        logger.debug(f"📤 {direction}: {type(message)} отправлено")
+                    except:
+                        # Просто пересылаем как есть
+                        await target.send_str(message)
+                        
+                elif isinstance(message, bytes):
+                    # Бинарное сообщение
+                    await target.send_bytes(message)
+                    logger.debug(f"📤 {direction}: бинарные данные отправлены")
                     
+                else:
+                    # WebSocketMessage
+                    if message.type == aiohttp.WSMsgType.TEXT:
+                        try:
+                            data = json.loads(message.data)
+                            await target.send_str(json.dumps(data))
+                            
+                            if "audio" in data:
+                                app_state.stats["audio_chunks_sent"] += 1
+                                
+                        except:
+                            # Просто пересылаем как есть
+                            await target.send_str(message.data)
+                            
                     elif message.type == aiohttp.WSMsgType.BINARY:
-                        await target_ws.send_bytes(message.data)
-                    
+                        await target.send_bytes(message.data)
+                        
                     elif message.type == aiohttp.WSMsgType.CLOSED:
                         logger.info(f"WebSocket закрыт: {direction}")
                         break
-                    
+                        
                     elif message.type == aiohttp.WSMsgType.ERROR:
                         logger.error(f"WebSocket ошибка: {message.data}")
                         break
-            
-            except Exception as e:
-                logger.error(f"❌ Ошибка пересылки сообщения ({direction}): {e}")
-                if direction == "elevenlabs_to_client":
+        
+        else:
+            # От ElevenLabs к клиенту
+            async for message in source:
+                if isinstance(message, str):
+                    # Текстовое сообщение
                     try:
-                        await target_ws.send_json({
-                            "type": "error",
-                            "message": f"Ошибка пересылки: {str(e)}"
-                        })
+                        data = json.loads(message)
+                        await target.send_text(json.dumps(data))
+                        
+                        # Если это аудио
+                        if "audio" in data:
+                            app_state.stats["audio_chunks_received"] += 1
+                            
+                        logger.debug(f"📤 {direction}: {type(message)} отправлено")
                     except:
-                        pass
+                        # Просто пересылаем как есть
+                        await target.send_text(message)
+                        
+                elif isinstance(message, bytes):
+                    # Бинарное сообщение
+                    await target.send_bytes(message)
+                    logger.debug(f"📤 {direction}: бинарные данные отправлены")
+                    
+                else:
+                    # WebSocketMessage
+                    if message.type == aiohttp.WSMsgType.TEXT:
+                        try:
+                            data = json.loads(message.data)
+                            await target.send_text(json.dumps(data))
+                            
+                            if "audio" in data:
+                                app_state.stats["audio_chunks_received"] += 1
+                                
+                        except:
+                            # Просто пересылаем как есть
+                            await target.send_text(message.data)
+                            
+                    elif message.type == aiohttp.WSMsgType.BINARY:
+                        await target.send_bytes(message.data)
+                        
+                    elif message.type == aiohttp.WSMsgType.CLOSED:
+                        logger.info(f"WebSocket закрыт: {direction}")
+                        break
+                        
+                    elif message.type == aiohttp.WSMsgType.ERROR:
+                        logger.error(f"WebSocket ошибка: {message.data}")
+                        break
     
     except (WebSocketDisconnect, aiohttp.ClientError) as e:
         logger.info(f"👋 WebSocket отключен ({direction}): {e}")
@@ -1151,8 +1403,8 @@ async def main():
     # Настройка логирования
     setup_logging()
     
-    logger.info("🌐 Запуск в режиме веб-сервиса с поддержкой аудио в браузере...")
-    logger.info("💡 Это облачная версия с аудио через Web Audio API")
+    logger.info("🌐 Запуск в режиме веб-сервиса с прямым WebSocket...")
+    logger.info("💡 Это полная версия с поддержкой голосового интерфейса")
     logger.info("🔗 Откройте http://localhost:8000 для веб-интерфейса")
     
     # Запуск через uvicorn
