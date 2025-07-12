@@ -1,17 +1,15 @@
-# render.yaml - ElevenLabs Conversational AI Python (Fixed)
-# Исправленная конфигурация для развертывания на Render.com
-
+# render.yaml - ElevenLabs Voice Assistant с поддержкой аудио в браузере
 services:
-  # Основной веб-сервис (БЕЗ PyAudio)
+  # Основной веб-сервис
   - type: web
-    name: elevenlabs-python-cloud
+    name: elevenlabs-voice-assistant
     runtime: python3
     plan: starter
     
-    # Исправленные команды сборки
+    # Команды сборки
     buildCommand: |
       pip install --upgrade pip && 
-      pip install -r requirements-render.txt
+      pip install aiohttp fastapi uvicorn websockets colorlog python-dotenv
     
     # Команда запуска веб-версии
     startCommand: python main_render.py
@@ -24,7 +22,7 @@ services:
       - key: ELEVENLABS_API_KEY
         sync: false  # Установите через Render Dashboard
       - key: ELEVENLABS_AGENT_ID
-        sync: false  # Опционально
+        value: "agent_01jzwcew2ferttga9m1zcn3js1"  # Можете заменить на свой ID
       - key: PYTHON_VERSION
         value: "3.11"
       - key: LOG_LEVEL
@@ -34,102 +32,5 @@ services:
       - key: DEBUG
         value: "false"
     
-    # Ресурсы
-    disk:
-      name: elevenlabs-data
-      mountPath: /app/data
-      sizeGB: 1
-    
     # Автоматический деплой
     autoDeploy: true
-
-  # Альтернативный сервис для фонового режима (если нужен)
-  - type: background
-    name: elevenlabs-background-worker
-    runtime: python3
-    plan: starter
-    
-    buildCommand: |
-      pip install --upgrade pip && 
-      pip install -r requirements-render.txt
-    
-    # Фоновый воркер (без веб-интерфейса)
-    startCommand: |
-      python -c "
-      import asyncio
-      import time
-      import logging
-      from websocket_client import ElevenLabsWebSocketClient
-      from config import Config
-      
-      logging.basicConfig(level=logging.INFO)
-      logger = logging.getLogger(__name__)
-      
-      async def background_worker():
-          logger.info('🔄 Фоновый воркер запущен')
-          config = Config()
-          
-          while True:
-              try:
-                  # Периодическая проверка соединения
-                  client = ElevenLabsWebSocketClient(config.ELEVENLABS_API_KEY, config.ELEVENLABS_AGENT_ID, None)
-                  result = await client.connect()
-                  
-                  if result:
-                      logger.info('✅ Соединение с ElevenLabs проверено')
-                      await client.disconnect()
-                  else:
-                      logger.warning('⚠️ Проблемы с соединением')
-                  
-                  await asyncio.sleep(300)  # Проверка каждые 5 минут
-                  
-              except Exception as e:
-                  logger.error(f'❌ Ошибка воркера: {e}')
-                  await asyncio.sleep(60)
-      
-      asyncio.run(background_worker())
-      "
-    
-    envVars:
-      - key: ELEVENLABS_API_KEY
-        sync: false
-      - key: ELEVENLABS_AGENT_ID
-        sync: false
-      - key: LOG_LEVEL
-        value: "INFO"
-    
-    # Не запускаем автоматически
-    autoDeploy: false
-
-# ===== ОБНОВЛЕННЫЕ ИНСТРУКЦИИ =====
-#
-# 🔧 ИСПРАВЛЕНИЯ:
-# 1. Используется requirements-render.txt БЕЗ PyAudio
-# 2. Запускается main_render.py с веб-интерфейсом
-# 3. Убраны системные зависимости (не нужны без PyAudio)
-# 4. Добавлен веб-интерфейс для проверки статуса
-#
-# 🚀 КОМАНДЫ ДЛЯ RENDER:
-# Build Command: pip install --upgrade pip && pip install -r requirements-render.txt
-# Start Command: python main_render.py
-# Environment Variables: ELEVENLABS_API_KEY=your_key
-#
-# 🌐 ВОЗМОЖНОСТИ ОБЛАЧНОЙ ВЕРСИИ:
-# ✅ REST API эндпоинты
-# ✅ WebSocket соединения  
-# ✅ Веб-интерфейс статуса
-# ✅ Проверка здоровья сервиса
-# ✅ Интеграция с ElevenLabs API
-# ❌ Аудио интерфейс (только локально)
-#
-# 🎯 ИСПОЛЬЗОВАНИЕ:
-# - Откройте URL Render сервиса для веб-интерфейса
-# - /health - проверка статуса
-# - /api/stats - статистика  
-# - /api/test-connection - тест ElevenLabs
-# - /ws - WebSocket для интеграций
-#
-# 💡 ДЛЯ ПОЛНОГО ФУНКЦИОНАЛА:
-# Используйте локальную версию с PyAudio:
-# pip install -r requirements.txt
-# python run.py
