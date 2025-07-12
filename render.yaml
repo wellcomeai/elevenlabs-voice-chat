@@ -1,4 +1,4 @@
-# render.yaml - ElevenLabs Voice Assistant с поддержкой аудио в браузере
+# render.yaml - ElevenLabs Voice Assistant с прямым WebSocket
 services:
   # Основной веб-сервис
   - type: web
@@ -21,16 +21,9 @@ services:
     envVars:
       - key: ELEVENLABS_API_KEY
         sync: false  # Установите через Render Dashboard
-      - key: ELEVENLABS_AGENT_ID
-        value: "agent_01jzwcew2ferttga9m1zcn3js1"  # Можете заменить на свой ID
       - key: PYTHON_VERSION
         value: "3.11"
       - key: LOG_LEVEL
         value: "INFO"
       - key: PORT
         value: "10000"
-      - key: DEBUG
-        value: "false"
-    
-    # Автоматический деплой
-    autoDeploy: true
