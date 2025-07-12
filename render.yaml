@@ -1,54 +1,136 @@
-# render.yaml - ElevenLabs Conversational AI v2.0 Deployment
-# Исправленная конфигурация для Render.com
+# render.yaml - ElevenLabs Conversational AI Python CLI
+# Конфигурация для развертывания на Render.com
 
 services:
+  # Основное CLI приложение
   - type: web
-    name: elevenlabs-ai-assistant-v2
-    env: python
-    plan: starter # Можете изменить на professional для production
+    name: elevenlabs-python-cli
+    runtime: python3
+    plan: starter
     
     # Команды сборки и запуска
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    buildCommand: |
+      apt-get update && 
+      apt-get install -y portaudio19-dev libasound2-dev libsndfile1-dev && 
+      pip install -r requirements.txt
+    
+    # Для CLI приложения используем простой HTTP сервер для health check
+    startCommand: |
+      python -c "
+      import http.server
+      import socketserver
+      import threading
+      import main
+      import asyncio
+      
+      # Запускаем HTTP сервер для health check
+      def run_server():
+          with socketserver.TCPServer(('', 8000), http.server.SimpleHTTPRequestHandler) as httpd:
+              httpd.serve_forever()
+      
+      # Запускаем в отдельном потоке
+      server_thread = threading.Thread(target=run_server)
+      server_thread.daemon = True
+      server_thread.start()
+      
+      # Запускаем основное приложение
+      asyncio.run(main.main())
+      "
     
     # Health check
-    healthCheckPath: /health
+    healthCheckPath: /
     
     # Переменные окружения
     envVars:
       - key: ELEVENLABS_API_KEY
-        sync: false  # ВАЖНО: Установите через Render Dashboard
+        sync: false  # Установите через Render Dashboard
       - key: ELEVENLABS_AGENT_ID
-        sync: false  # Опционально: ID вашего агента
+        sync: false  # Опционально
       - key: PYTHON_VERSION
         value: "3.11"
-      - key: PORT
-        value: "10000"
       - key: LOG_LEVEL
-        value: "info"
+        value: "INFO"
+      - key: SAMPLE_RATE
+        value: "16000"
+      - key: CHUNK_SIZE
+        value: "1024"
+      - key: CHANNELS
+        value: "1"
+      - key: WEBSOCKET_TIMEOUT
+        value: "30"
+      - key: RECONNECT_ATTEMPTS
+        value: "5"
+      - key: HEARTBEAT_INTERVAL
+        value: "30"
     
     # Ресурсы
     disk:
-      name: tmp
-      mountPath: /tmp
+      name: elevenlabs-data
+      mountPath: /app/data
       sizeGB: 1
     
     # Автоматический деплой
     autoDeploy: true
+
+  # Альтернативный сервис для фонового режима
+  - type: background
+    name: elevenlabs-voice-worker
+    runtime: python3
+    plan: starter
     
-    # Регион (опционально)
-    # region: oregon
+    buildCommand: |
+      apt-get update && 
+      apt-get install -y portaudio19-dev libasound2-dev libsndfile1-dev && 
+      pip install -r requirements.txt
+    
+    startCommand: python main.py
+    
+    envVars:
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_AGENT_ID
+        sync: false
+      - key: LOG_LEVEL
+        value: "INFO"
+    
+    # Автоматический деплой
+    autoDeploy: false  # Запускаем только при необходимости
 
-# ===== ВАЖНЫЕ НАСТРОЙКИ ДЛЯ v2.0 =====
-# 1. Установите ELEVENLABS_API_KEY в Render Dashboard
-# 2. Получите ключ на: https://elevenlabs.io/
-# 3. ELEVENLABS_AGENT_ID - необязательный (для собственного агента)
-# 4. v2.0 исправляет проблемы с аудио воспроизведением
-# 5. Поддерживает PCM формат и правильные WebSocket события
+# Настройки базы данных (если понадобится)
+databases:
+  - name: elevenlabs-logs
+    databaseName: elevenlabs_logs
+    user: elevenlabs_user
 
-# ===== ИЗМЕНЕНИЯ В v2.0 =====
-# - Исправлен формат аудио (PCM 16kHz)
-# - Правильная обработка audio событий
-# - Конвертация WebM в PCM base64
-# - Ресэмплинг аудио до 16kHz
-# - Улучшенная стабильность соединения
+# ===== ВАЖНЫЕ ИНСТРУКЦИИ =====
+#
+# 1. ОБЯЗАТЕЛЬНЫЕ ПЕРЕМЕННЫЕ:
+#    - ELEVENLABS_API_KEY: Получите на https://elevenlabs.io/
+#    - Установите через Render Dashboard -> Environment
+#
+# 2. ОПЦИОНАЛЬНЫЕ ПЕРЕМЕННЫЕ:
+#    - ELEVENLABS_AGENT_ID: ID вашего агента (по умолчанию используется демо)
+#
+# 3. ДЛЯ CLI ПРИЛОЖЕНИЯ:
+#    - Основной сервис будет запущен как веб-сервис для health check
+#    - Реальное CLI взаимодействие происходит через логи
+#    - Используйте фоновый сервис для длительных задач
+#
+# 4. ОСОБЕННОСТИ RENDER:
+#    - PyAudio требует системные зависимости
+#    - Аудио ввод/вывод ограничен в контейнере
+#    - Рекомендуется для демонстрации или API использования
+#
+# 5. АЛЬТЕРНАТИВЫ:
+#    - Для полного аудио взаимодействия используйте локальный запуск
+#    - Можно адаптировать под REST API или WebSocket сервер
+#
+# 6. ДЕПЛОЙ:
+#    - Подключите репозиторий к Render
+#    - Установите переменные окружения
+#    - Деплой произойдет автоматически
+#
+# 7. МОНИТОРИНГ:
+#    - Логи доступны в Render Dashboard
+#    - Health check на порту 8000
+#    - Метрики производительности
