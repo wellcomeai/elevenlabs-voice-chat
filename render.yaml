@@ -9,13 +9,14 @@ services:
     # Команды сборки
     buildCommand: |
       pip install --upgrade pip && 
-      pip install aiohttp fastapi uvicorn websockets colorlog python-dotenv
+      pip install aiohttp fastapi uvicorn websockets colorlog python-dotenv gunicorn
     
-    # Команда запуска веб-версии
-    startCommand: python main_render.py
+    # Команда запуска веб-версии - используем gunicorn как более стабильный вариант
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT main_render:app
     
-    # Health check
+    # Health check с более длинным таймаутом
     healthCheckPath: /health
+    healthCheckTimeout: 60
     
     # Переменные окружения
     envVars:
@@ -25,5 +26,6 @@ services:
         value: "3.11"
       - key: LOG_LEVEL
         value: "INFO"
+      # Порт должен определяться Render, а не быть фиксированным
       - key: PORT
         value: "10000"
