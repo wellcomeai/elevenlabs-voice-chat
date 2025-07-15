@@ -65,20 +65,21 @@ app.get('/api/agent-id', async (req, res) => {
   }
 });
 
-// Function to check if agent exists - ИСПРАВЛЕНО
+// ✅ ИСПРАВЛЕНА КРИТИЧЕСКАЯ ОШИБКА: правильный endpoint для проверки агента
 function checkAgentExists() {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.elevenlabs.io',
       port: 443,
+      // ✅ ИСПРАВЛЕНО: используем правильный endpoint из документации
       path: `/v1/convai/agents/${AGENT_ID}`,
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',  // ✅ Добавлен User-Agent
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',
         'Accept': 'application/json'
       },
-      timeout: 10000 // Увеличен таймаут
+      timeout: 10000
     };
 
     const req = https.request(options, (res) => {
@@ -123,7 +124,7 @@ function checkAgentExists() {
   });
 }
 
-// ✅ SIGNED URL ENDPOINT - ИСПРАВЛЕН КРИТИЧЕСКИЙ БАГИ
+// ✅ ИСПРАВЛЕН КРИТИЧЕСКИЙ БАГ: правильный endpoint для signed URL
 app.get('/api/signed-url', async (req, res) => {
   console.log('🔐 Signed URL requested');
   
@@ -228,22 +229,22 @@ function getErrorRecommendations(status) {
   }
 }
 
-// ✅ ИСПРАВЛЕНА КРИТИЧЕСКАЯ ОШИБКА: endpoint с подчеркиванием
+// ✅ ИСПРАВЛЕНА КРИТИЧЕСКАЯ ОШИБКА: используем правильный endpoint
 function getSignedUrl() {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.elevenlabs.io',
       port: 443,
-      // ✅ ИСПРАВЛЕНО: get-signed-url → get_signed_url
-      path: `/v1/convai/conversation/get_signed_url?agent_id=${AGENT_ID}`,
+      // ✅ ИСПРАВЛЕНО: используем kebab-case endpoint (новый стандарт)
+      path: `/v1/convai/conversation/get-signed-url?agent_id=${AGENT_ID}`,
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',  // ✅ Добавлен User-Agent
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
-      timeout: 15000 // Увеличен таймаут до 15 секунд
+      timeout: 15000
     };
 
     const req = https.request(options, (res) => {
