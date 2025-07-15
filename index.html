@@ -438,10 +438,17 @@
                 this.lastActivityTime = Date.now();
                 
                 this.initializeElements();
+                
+                // Тестируем что addMessage работает
+                this.addMessage('system', '🚀 DirectVoiceChat v4.0 инициализирован');
+                this.addMessage('system', '💡 Нажмите "🧪 Тест API" для проверки настроек');
+                
                 console.log('✅ DirectVoiceChat v4.0 initialized');
             }
 
             initializeElements() {
+                console.log('🔧 Initializing elements...');
+                
                 this.connectBtn = document.getElementById('connectBtn');
                 this.disconnectBtn = document.getElementById('disconnectBtn');
                 this.testBtn = document.getElementById('testBtn');
@@ -456,10 +463,41 @@
                 this.connectionStateSpan = document.getElementById('connectionState');
                 this.wsEndpointSpan = document.getElementById('wsEndpoint');
 
-                this.connectBtn.addEventListener('click', () => this.connect());
-                this.disconnectBtn.addEventListener('click', () => this.disconnect());
-                this.testBtn.addEventListener('click', () => this.testAPI());
-                this.diagnosisBtn.addEventListener('click', () => this.diagnoseAgent());
+                // Проверяем что элементы найдены
+                if (!this.connectBtn) console.error('❌ connectBtn not found');
+                if (!this.testBtn) console.error('❌ testBtn not found');
+                if (!this.diagnosisBtn) console.error('❌ diagnosisBtn not found');
+
+                // Добавляем обработчики событий
+                if (this.connectBtn) {
+                    this.connectBtn.addEventListener('click', () => {
+                        console.log('🖱️ Connect button clicked');
+                        this.connect();
+                    });
+                }
+                
+                if (this.disconnectBtn) {
+                    this.disconnectBtn.addEventListener('click', () => {
+                        console.log('🖱️ Disconnect button clicked');
+                        this.disconnect();
+                    });
+                }
+                
+                if (this.testBtn) {
+                    this.testBtn.addEventListener('click', () => {
+                        console.log('🖱️ Test button clicked');
+                        this.testAPI();
+                    });
+                }
+                
+                if (this.diagnosisBtn) {
+                    this.diagnosisBtn.addEventListener('click', () => {
+                        console.log('🖱️ Diagnosis button clicked');
+                        this.diagnoseAgent();
+                    });
+                }
+                
+                console.log('✅ Elements initialized');
             }
 
             async diagnoseAgent() {
@@ -613,7 +651,97 @@
                 }
             }
 
+            async diagnoseAgent() {
+                const apiKey = this.apiKeyInput.value.trim();
+                const agentId = this.agentIdInput.value.trim();
+
+                if (!apiKey || !agentId) {
+                    this.addMessage('system', '❌ Введите API Key и Agent ID');
+                    return;
+                }
+
+                this.diagnosisBtn.disabled = true;
+                this.diagnosisBtn.textContent = '⏳ Диагностика...';
+                
+                try {
+                    this.addMessage('system', '🔍 Подробная диагностика агента...');
+                    
+                    // Получаем детальную информацию об агенте
+                    const agentResponse = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${agentId}`, {
+                        headers: {
+                            'xi-api-key': apiKey,
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    if (agentResponse.ok) {
+                        const agentData = await agentResponse.json();
+                        
+                        this.addMessage('system', `✅ Агент найден: "${agentData.name || agentId}"`);
+                        
+                        // Проверяем конфигурацию агента
+                        const config = agentData.conversation_config || {};
+                        
+                        // Проверка LLM
+                        if (config.agent && config.agent.llm) {
+                            const llm = config.agent.llm;
+                            this.addMessage('system', `🧠 LLM: ${llm.model || 'не указан'}`);
+                            if (llm.model) {
+                                this.addMessage('system', `✅ LLM настроен правильно`);
+                            } else {
+                                this.addMessage('system', `❌ LLM не настроен - это может быть причиной ошибки!`);
+                                this.addMessage('system', `💡 Настройте LLM в ElevenLabs Dashboard → Agent → LLM`);
+                            }
+                        } else {
+                            this.addMessage('system', `❌ LLM конфигурация отсутствует!`);
+                            this.addMessage('system', `💡 Настройте LLM в ElevenLabs Dashboard`);
+                        }
+                        
+                        // Проверка голоса
+                        if (config.tts && config.tts.voice_id) {
+                            this.addMessage('system', `🎤 Voice ID: ${config.tts.voice_id}`);
+                            this.addMessage('system', `✅ Голос настроен`);
+                        } else {
+                            this.addMessage('system', `❌ Голос не настроен!`);
+                            this.addMessage('system', `💡 Выберите голос в настройках агента`);
+                        }
+                        
+                        // Проверка языка
+                        if (config.language) {
+                            this.addMessage('system', `🌐 Язык: ${config.language}`);
+                        }
+                        
+                        // Проверка платформы
+                        const platform = agentData.platform_settings || {};
+                        if (platform.widget_enabled !== undefined) {
+                            this.addMessage('system', `🌐 Widget: ${platform.widget_enabled ? 'включен' : 'отключен'}`);
+                        }
+                        
+                        // Общие рекомендации
+                        this.addMessage('system', '💡 Для устранения ошибки 1002 проверьте:');
+                        this.addMessage('system', '• LLM правильно настроен и доступен');
+                        this.addMessage('system', '• Голос выбран и доступен');
+                        this.addMessage('system', '• Агент опубликован (не в draft режиме)');
+                        this.addMessage('system', '• Prompt содержит корректные инструкции');
+                        
+                    } else if (agentResponse.status === 404) {
+                        this.addMessage('system', '❌ Агент не найден');
+                        this.addMessage('system', '💡 Проверьте Agent ID в ElevenLabs Dashboard');
+                    } else {
+                        this.addMessage('system', `❌ Ошибка API: ${agentResponse.status}`);
+                    }
+
+                } catch (error) {
+                    console.error('Agent diagnosis failed:', error);
+                    this.addMessage('system', `❌ Ошибка диагностики: ${error.message}`);
+                } finally {
+                    this.diagnosisBtn.disabled = false;
+                    this.diagnosisBtn.textContent = '🔍 Диагностика агента';
+                }
+            }
+
             async connect() {
+                console.log('🚀 connect function called');
                 const apiKey = this.apiKeyInput.value.trim();
                 const agentId = this.agentIdInput.value.trim();
 
@@ -1248,6 +1376,7 @@
             }
 
             addMessage(type, content) {
+                console.log(`📝 Adding message: ${type} - ${content}`);
                 if (this.chatArea) {
                     const message = document.createElement('div');
                     message.className = `message ${type}`;
@@ -1255,6 +1384,8 @@
                     
                     this.chatArea.appendChild(message);
                     this.chatArea.scrollTop = this.chatArea.scrollHeight;
+                } else {
+                    console.error('❌ chatArea not found, message not added');
                 }
             }
         }
@@ -1262,7 +1393,41 @@
         // Инициализация
         document.addEventListener('DOMContentLoaded', () => {
             console.log('🚀 DOM loaded, initializing DirectVoiceChat v4.0...');
-            window.voiceChat = new DirectVoiceChat();
+            
+            // Проверяем наличие основных элементов
+            const connectBtn = document.getElementById('connectBtn');
+            const testBtn = document.getElementById('testBtn');
+            
+            if (!connectBtn) {
+                console.error('❌ CRITICAL: connectBtn element not found in DOM!');
+                alert('Ошибка: не найдена кнопка подключения. Проверьте HTML код.');
+                return;
+            }
+            
+            if (!testBtn) {
+                console.error('❌ CRITICAL: testBtn element not found in DOM!');
+                alert('Ошибка: не найдена кнопка тестирования. Проверьте HTML код.');
+                return;
+            }
+            
+            try {
+                window.voiceChat = new DirectVoiceChat();
+                console.log('✅ DirectVoiceChat v4.0 initialized successfully');
+            } catch (error) {
+                console.error('❌ Failed to initialize DirectVoiceChat:', error);
+                alert('Ошибка инициализации: ' + error.message);
+            }
+        });
+        
+        // Обработчик глобальных ошибок
+        window.addEventListener('error', (event) => {
+            console.error('🚨 Global JavaScript Error:', event.error);
+            console.error('🚨 Error details:', {
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno
+            });
         });
     </script>
 </body>
