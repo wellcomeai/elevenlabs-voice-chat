@@ -404,7 +404,7 @@
             <p>🎯 ПРЯМОЕ подключение к ElevenLabs • Без промежуточного сервера</p>
             <p>💡 Проверьте данные в ElevenLabs Dashboard</p>
             <p style="margin-top: 0.5rem; font-size: 0.75rem; color: #999;">
-                v4.0 Direct • WebSocket без сервера • Минимальная задержка
+                v4.1 Fixed • WebSocket без сервера • Минимальная задержка
             </p>
         </div>
     </div>
@@ -412,7 +412,7 @@
     <script>
         class DirectVoiceChat {
             constructor() {
-                console.log('🚀 DirectVoiceChat v4.0 starting - DIRECT CONNECTION');
+                console.log('🚀 DirectVoiceChat v4.1 starting - DIRECT CONNECTION (Fixed)');
                 
                 // Основные состояния
                 this.ws = null;
@@ -440,10 +440,10 @@
                 this.initializeElements();
                 
                 // Тестируем что addMessage работает
-                this.addMessage('system', '🚀 DirectVoiceChat v4.0 инициализирован');
+                this.addMessage('system', '🚀 DirectVoiceChat v4.1 (Fixed) инициализирован');
                 this.addMessage('system', '💡 Нажмите "🧪 Тест API" для проверки настроек');
                 
-                console.log('✅ DirectVoiceChat v4.0 initialized');
+                console.log('✅ DirectVoiceChat v4.1 initialized');
             }
 
             initializeElements() {
@@ -500,94 +500,8 @@
                 console.log('✅ Elements initialized');
             }
 
-            async diagnoseAgent() {
-                const apiKey = this.apiKeyInput.value.trim();
-                const agentId = this.agentIdInput.value.trim();
-
-                if (!apiKey || !agentId) {
-                    this.addMessage('system', '❌ Введите API Key и Agent ID');
-                    return;
-                }
-
-                this.diagnosisBtn.disabled = true;
-                this.diagnosisBtn.textContent = '⏳ Диагностика...';
-                
-                try {
-                    this.addMessage('system', '🔍 Подробная диагностика агента...');
-                    
-                    // Получаем детальную информацию об агенте
-                    const agentResponse = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${agentId}`, {
-                        headers: {
-                            'xi-api-key': apiKey,
-                            'Accept': 'application/json'
-                        }
-                    });
-
-                    if (agentResponse.ok) {
-                        const agentData = await agentResponse.json();
-                        
-                        this.addMessage('system', `✅ Агент найден: "${agentData.name || agentId}"`);
-                        
-                        // Проверяем конфигурацию агента
-                        const config = agentData.conversation_config || {};
-                        
-                        // Проверка LLM
-                        if (config.agent && config.agent.llm) {
-                            const llm = config.agent.llm;
-                            this.addMessage('system', `🧠 LLM: ${llm.model || 'не указан'}`);
-                            if (llm.model) {
-                                this.addMessage('system', `✅ LLM настроен правильно`);
-                            } else {
-                                this.addMessage('system', `❌ LLM не настроен - это может быть причиной ошибки!`);
-                                this.addMessage('system', `💡 Настройте LLM в ElevenLabs Dashboard → Agent → LLM`);
-                            }
-                        } else {
-                            this.addMessage('system', `❌ LLM конфигурация отсутствует!`);
-                            this.addMessage('system', `💡 Настройте LLM в ElevenLabs Dashboard`);
-                        }
-                        
-                        // Проверка голоса
-                        if (config.tts && config.tts.voice_id) {
-                            this.addMessage('system', `🎤 Voice ID: ${config.tts.voice_id}`);
-                            this.addMessage('system', `✅ Голос настроен`);
-                        } else {
-                            this.addMessage('system', `❌ Голос не настроен!`);
-                            this.addMessage('system', `💡 Выберите голос в настройках агента`);
-                        }
-                        
-                        // Проверка языка
-                        if (config.language) {
-                            this.addMessage('system', `🌐 Язык: ${config.language}`);
-                        }
-                        
-                        // Проверка платформы
-                        const platform = agentData.platform_settings || {};
-                        if (platform.widget_enabled !== undefined) {
-                            this.addMessage('system', `🌐 Widget: ${platform.widget_enabled ? 'включен' : 'отключен'}`);
-                        }
-                        
-                        // Общие рекомендации
-                        this.addMessage('system', '💡 Для устранения ошибки 1002 проверьте:');
-                        this.addMessage('system', '• LLM правильно настроен и доступен');
-                        this.addMessage('system', '• Голос выбран и доступен');
-                        this.addMessage('system', '• Агент опубликован (не в draft режиме)');
-                        this.addMessage('system', '• Prompt содержит корректные инструкции');
-                        
-                    } else if (agentResponse.status === 404) {
-                        this.addMessage('system', '❌ Агент не найден');
-                        this.addMessage('system', '💡 Проверьте Agent ID в ElevenLabs Dashboard');
-                    } else {
-                        this.addMessage('system', `❌ Ошибка API: ${agentResponse.status}`);
-                    }
-
-                } catch (error) {
-                    console.error('Agent diagnosis failed:', error);
-                    this.addMessage('system', `❌ Ошибка диагностики: ${error.message}`);
-                } finally {
-                    this.diagnosisBtn.disabled = false;
-                    this.diagnosisBtn.textContent = '🔍 Диагностика агента';
-                }
-            }
+            // ✅ ИСПРАВЛЕНО: testAPI() теперь внутри класса
+            async testAPI() {
                 const apiKey = this.apiKeyInput.value.trim();
                 const agentId = this.agentIdInput.value.trim();
 
@@ -651,6 +565,7 @@
                 }
             }
 
+            // ✅ ИСПРАВЛЕНО: оставляем только одну функцию diagnoseAgent()
             async diagnoseAgent() {
                 const apiKey = this.apiKeyInput.value.trim();
                 const agentId = this.agentIdInput.value.trim();
@@ -709,12 +624,6 @@
                         // Проверка языка
                         if (config.language) {
                             this.addMessage('system', `🌐 Язык: ${config.language}`);
-                        }
-                        
-                        // Проверка платформы
-                        const platform = agentData.platform_settings || {};
-                        if (platform.widget_enabled !== undefined) {
-                            this.addMessage('system', `🌐 Widget: ${platform.widget_enabled ? 'включен' : 'отключен'}`);
                         }
                         
                         // Общие рекомендации
@@ -777,9 +686,6 @@
                     
                     this.ws = new WebSocket(wsUrl);
                     
-                    // Устанавливаем API ключ в заголовки (если поддерживается браузером)
-                    // Если нет - отправим в первом сообщении
-                    
                     const connectionTimeout = setTimeout(() => {
                         if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
                             console.log('Connection timeout (15s)');
@@ -835,7 +741,7 @@
                 // Отправляем инициализационное сообщение с API ключом
                 const initMessage = {
                     type: "conversation_initiation_client_data",
-                    xi_api_key: apiKey  // Отправляем API ключ в первом сообщении
+                    xi_api_key: apiKey
                 };
                 
                 console.log('📤 Sending initialization with API key');
@@ -1027,6 +933,9 @@
             handlePong(data) {
                 console.log('🏓 Pong received');
             }
+
+            // ✅ ИСПРАВЛЕНО: правильно закрываем функцию handleServerError
+            handleServerError(data) {
                 console.error('Server error:', data);
                 const errorMsg = data.error || data.message || 'Unknown server error';
                 this.addMessage('system', `❌ Ошибка сервера: ${errorMsg}`);
@@ -1392,7 +1301,7 @@
 
         // Инициализация
         document.addEventListener('DOMContentLoaded', () => {
-            console.log('🚀 DOM loaded, initializing DirectVoiceChat v4.0...');
+            console.log('🚀 DOM loaded, initializing DirectVoiceChat v4.1 (Fixed)...');
             
             // Проверяем наличие основных элементов
             const connectBtn = document.getElementById('connectBtn');
@@ -1412,7 +1321,7 @@
             
             try {
                 window.voiceChat = new DirectVoiceChat();
-                console.log('✅ DirectVoiceChat v4.0 initialized successfully');
+                console.log('✅ DirectVoiceChat v4.1 (Fixed) initialized successfully');
             } catch (error) {
                 console.error('❌ Failed to initialize DirectVoiceChat:', error);
                 alert('Ошибка инициализации: ' + error.message);
