@@ -3,7 +3,8 @@ const path = require('path');
 const https = require('https');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// ✅ ИСПРАВЛЕНО: используем порт 10000 как в логах
+const PORT = process.env.PORT || 10000;
 
 // Middleware
 app.use(express.json());
@@ -76,7 +77,7 @@ function checkAgentExists() {
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.1',
         'Accept': 'application/json'
       },
       timeout: 10000
@@ -240,7 +241,7 @@ function getSignedUrl() {
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat/2.0',
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.1',
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
@@ -319,6 +320,7 @@ app.get('/health', async (req, res) => {
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     version: process.version,
+    port: PORT, // ✅ Добавлен порт в health check
     agent_id: AGENT_ID,
     api_configured: !!ELEVENLABS_API_KEY
   };
@@ -348,7 +350,7 @@ function checkElevenLabsAPI() {
       method: 'GET',
       headers: {
         'xi-api-key': ELEVENLABS_API_KEY,
-        'User-Agent': 'ElevenLabs-Voice-Chat/2.0'
+        'User-Agent': 'ElevenLabs-Voice-Chat/2.1'
       },
       timeout: 5000
     };
@@ -417,7 +419,8 @@ app.get('/api/diagnostics', async (req, res) => {
       status: 'running',
       uptime: process.uptime(),
       memory: process.memoryUsage(),
-      version: process.version
+      version: process.version,
+      port: PORT // ✅ Добавлен актуальный порт
     },
     configuration: {
       agent_id: AGENT_ID,
